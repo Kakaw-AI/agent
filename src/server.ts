@@ -4,6 +4,13 @@ import { syncDatabase } from "./database/index.js";
 import { loadAgentEnv } from "./env.js";
 import { toErrorInfo } from "./errors.js";
 import { runAgent } from "./graph/index.js";
+import {
+  buildRunRequestLogContext,
+  buildSyncRequestLogContext,
+  logAgentMessage,
+  redactErrorMessage,
+  summarizeAgentEvents,
+} from "./logging.js";
 import type { AgentRunRequest, AgentSyncRequest } from "./types.js";
 
 loadAgentEnv();
@@ -12,6 +19,8 @@ const host = process.env.HOST?.trim() || "0.0.0.0";
 const port = Number(process.env.PORT ?? 8000);
 
 const server = createServer(async (request, response) => {
+  const startedAt = Date.now();
+
   try {
     if (request.method === "GET" && request.url === "/healthz") {
       writeJson(response, 200, { status: "ok" });
@@ -32,13 +41,28 @@ const server = createServer(async (request, response) => {
 
     if (request.url === "/api/chat/sync") {
       const payload = JSON.parse(rawBody) as AgentSyncRequest;
-      writeJson(response, 200, await syncDatabase(payload.database));
+      logAgentMessage("sync_request_received", buildSyncRequestLogContext(payload));
+      const result = await syncDatabase(payload.database);
+      logAgentMessage("sync_request_completed", {
+        ...buildSyncRequestLogContext(payload),
+        status: result.status,
+        durationMs: Date.now() - startedAt,
+        tableCount: result.catalog.tables.length,
+      });
+      writeJson(response, 200, result);
       return;
     }
 
     if (request.url === "/api/chat/run") {
       const payload = JSON.parse(rawBody) as AgentRunRequest;
+      const requestLog = buildRunRequestLogContext(payload);
+      logAgentMessage("chat_request_received", requestLog);
       const events = await runAgent(payload);
+      logAgentMessage("chat_request_completed", {
+        ...requestLog,
+        durationMs: Date.now() - startedAt,
+        ...summarizeAgentEvents(events),
+      });
 
       response.writeHead(200, {
         "content-type": "application/x-ndjson; charset=utf-8",
@@ -55,6 +79,14 @@ const server = createServer(async (request, response) => {
     writeJson(response, 404, { error: { message: "Not found." } });
   } catch (error) {
     const info = toErrorInfo(error);
+    logAgentMessage("request_failed", {
+      method: request.method ?? "UNKNOWN",
+      url: request.url ?? "UNKNOWN",
+      durationMs: Date.now() - startedAt,
+      error: redactErrorMessage(info.message),
+      code: info.code,
+      statusCode: info.statusCode,
+    });
     writeJson(response, info.statusCode, { error: info });
   }
 });

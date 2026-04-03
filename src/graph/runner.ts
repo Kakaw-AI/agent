@@ -1,18 +1,29 @@
 import { StateGraph } from "@langchain/langgraph";
 import { GraphState } from "./state.js";
-import { responseCache, loadCacheNode, generateSqlNode, executeSqlNode, composeAnswerNode, planChartNode, generateSuggestionsNode } from "./nodes.js";
+import {
+  loadCacheNode,
+  classifyIntentNode,
+  generateSqlNode,
+  executeSqlNode,
+  composeAnswerNode,
+  planChartNode,
+  generateSuggestionsNode,
+} from "./nodes.js";
 import type { AgentRunRequest, AgentStreamEvent } from "../types.js";
+import type { GraphStateValue } from "./state.js";
 
 export async function runAgent(request: AgentRunRequest): Promise<AgentStreamEvent[]> {
   const graph = new StateGraph(GraphState)
     .addNode("loadCache", (state) => loadCacheNode(request, state))
+    .addNode("classifyIntent", (state) => classifyIntentNode(request, state))
     .addNode("generateSql", (state) => generateSqlNode(request, state))
     .addNode("executeSql", (state) => executeSqlNode(request, state))
     .addNode("composeAnswer", (state) => composeAnswerNode(request, state))
     .addNode("planChart", (state) => planChartNode(request, state))
     .addNode("generateSuggestions", (state) => generateSuggestionsNode(request, state))
     .addEdge("__start__", "loadCache")
-    .addEdge("loadCache", "generateSql")
+    .addEdge("loadCache", "classifyIntent")
+    .addEdge("classifyIntent", "generateSql")
     .addEdge("generateSql", "executeSql")
     .addEdge("executeSql", "composeAnswer")
     .addEdge("composeAnswer", "planChart")
@@ -22,16 +33,13 @@ export async function runAgent(request: AgentRunRequest): Promise<AgentStreamEve
 
   const finalState = await graph.invoke({});
 
-  if (!finalState.cacheHit && finalState.answer && finalState.sql) {
-    responseCache.set(finalState.cacheKey, {
-      sql: finalState.sql,
-      rows: finalState.rows,
-      columns: finalState.columns,
-      answer: finalState.answer,
-      chartSpec: finalState.chartSpec,
-      suggestions: finalState.suggestions,
-    });
-  }
+  return buildEventsFromFinalState(request, finalState);
+}
+
+export function buildEventsFromFinalState(
+  request: AgentRunRequest,
+  finalState: GraphStateValue,
+): AgentStreamEvent[] {
 
   const events: AgentStreamEvent[] = [
     { type: "message_started", data: { messageId: request.messageId } },
@@ -45,7 +53,7 @@ export async function runAgent(request: AgentRunRequest): Promise<AgentStreamEve
     events.push({
       type: "sql_result",
       data: {
-        rowCount: finalState.rows.length,
+        rowCount: finalState.rowCount,
         columns: finalState.columns,
         rows: finalState.rows,
       },
@@ -63,6 +71,25 @@ export async function runAgent(request: AgentRunRequest): Promise<AgentStreamEve
         spec: finalState.chartSpec,
       },
     });
+  }
+
+  if (finalState.errorMessage) {
+    return [
+      ...events,
+      {
+        type: "message_failed",
+        data: {
+          messageId: request.messageId,
+          error: finalState.errorMessage,
+          errorInfo: {
+            message: finalState.errorMessage,
+            code: "AGENT_SQL_GENERATION_FAILED",
+            statusCode: 502,
+            retryable: false,
+          },
+        },
+      },
+    ];
   }
 
   if (!finalState.answer) {

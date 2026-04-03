@@ -1,5 +1,6 @@
 import { Annotation } from "@langchain/langgraph";
 import type { TokenUsage } from "../types.js";
+import type { IntentKind } from "./policy.js";
 
 function mergeTokenUsage(left: TokenUsage | null, right: TokenUsage | null) {
   if (!left) {
@@ -18,6 +19,14 @@ function mergeTokenUsage(left: TokenUsage | null, right: TokenUsage | null) {
 
 export const GraphState = Annotation.Root({
   sql: Annotation<string>(),
+  errorMessage: Annotation<string | null>({
+    reducer: (_left, right) => right,
+    default: () => null,
+  }),
+  rowCount: Annotation<number>({
+    reducer: (_left, right) => right,
+    default: () => 0,
+  }),
   rows: Annotation<Array<Record<string, unknown>>>({
     reducer: (_left, right) => right,
     default: () => [],
@@ -37,6 +46,18 @@ export const GraphState = Annotation.Root({
   }),
   cacheKey: Annotation<string>(),
   cacheHit: Annotation<boolean>({
+    reducer: (_left, right) => right,
+    default: () => false,
+  }),
+  intentKind: Annotation<IntentKind>({
+    reducer: (_left, right) => right,
+    default: () => "data_answer",
+  }),
+  wantsVisualization: Annotation<boolean>({
+    reducer: (_left, right) => right,
+    default: () => false,
+  }),
+  needsImplicitCountMetric: Annotation<boolean>({
     reducer: (_left, right) => right,
     default: () => false,
   }),

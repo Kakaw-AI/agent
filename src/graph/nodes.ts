@@ -1,9 +1,17 @@
 import { LruCache } from "../cache.js";
 import { invokeJson, invokeText } from "../llm/index.js";
 import { executeReadOnlyQuery } from "../database/index.js";
-import { buildCacheKey, buildSqlSystemPrompt, buildSqlRepairPrompt } from "./prompts.js";
+import { buildSqlSystemPrompt, buildSqlRepairPrompt } from "./prompts.js";
 import type { GraphStateValue } from "./state.js";
 import type { AgentRunRequest, TokenUsage } from "../types.js";
+import {
+  buildDirectAnswer,
+  buildNoRowsAnswer,
+  classifyIntentHeuristically,
+  needsImplicitCountMetric as shouldUseImplicitCountMetric,
+  shouldAutoPlanChart,
+  toReadableLabel,
+} from "./policy.js";
 
 export const responseCache = new LruCache<{
   sql: string;
@@ -15,30 +23,42 @@ export const responseCache = new LruCache<{
 }>(200, 5 * 60 * 1000);
 
 export async function loadCacheNode(request: AgentRunRequest, _state: GraphStateValue) {
-  const cacheKey = buildCacheKey(request);
-  const cached = responseCache.get(cacheKey);
-  if (!cached) {
+  return {
+    steps: [{ text: "Loading indexed schema context...", at: new Date().toISOString() }],
+  };
+}
+
+export async function classifyIntentNode(request: AgentRunRequest, state: GraphStateValue) {
+  if (state.cacheHit) {
+    return {};
+  }
+
+  const intent = classifyIntentHeuristically(request.message);
+  const availableColumns = request.knowledge.tables.flatMap((table) =>
+    table.columns.map((column) => column.name),
+  );
+  const needsImplicitCountMetric = shouldUseImplicitCountMetric(intent, availableColumns);
+
+  if (intent.kind === "small_talk") {
     return {
-      cacheKey,
-      steps: [{ text: "Loading indexed schema context...", at: new Date().toISOString() }],
+      intentKind: intent.kind,
+      wantsVisualization: intent.wantsVisualization,
+      needsImplicitCountMetric,
+      answer: buildDirectAnswer(request.message),
+      suggestions: [],
+      steps: [{ text: "Responding directly without querying the database...", at: new Date().toISOString() }],
     };
   }
 
   return {
-    cacheKey,
-    cacheHit: true,
-    sql: cached.sql,
-    rows: cached.rows,
-    columns: cached.columns,
-    answer: cached.answer,
-    chartSpec: cached.chartSpec,
-    suggestions: cached.suggestions,
-    steps: [{ text: "Using cached answer for a repeated question...", at: new Date().toISOString() }],
+    intentKind: intent.kind,
+    wantsVisualization: intent.wantsVisualization,
+    needsImplicitCountMetric,
   };
 }
 
 export async function generateSqlNode(request: AgentRunRequest, state: GraphStateValue) {
-  if (state.cacheHit) {
+  if (state.cacheHit || state.intentKind === "small_talk" || state.answer || state.errorMessage) {
     return {};
   }
 
@@ -47,8 +67,18 @@ export async function generateSqlNode(request: AgentRunRequest, state: GraphStat
   try {
     const result = await invokeJson<{ sql: string; rationale?: string }>({
       llm: request.llm,
-      systemPrompt: buildSqlSystemPrompt(request.knowledge),
-      userPrompt: `Question: ${request.message}`,
+      systemPrompt: buildSqlSystemPrompt(request.knowledge, {
+        wantsVisualization: state.wantsVisualization,
+        needsImplicitCountMetric: state.needsImplicitCountMetric,
+      }),
+      userPrompt: [
+        `Question: ${request.message}`,
+        state.needsImplicitCountMetric
+          ? "The chart should use COUNT(*) grouped by the requested category unless the user explicitly asked for a different metric."
+          : null,
+      ]
+        .filter(Boolean)
+        .join("\n"),
       history: request.history,
       temperature: 0.1,
     });
@@ -57,7 +87,7 @@ export async function generateSqlNode(request: AgentRunRequest, state: GraphStat
   } catch (err) {
     const message = err instanceof Error ? err.message : "SQL generation failed.";
     return {
-      sql: "",
+      errorMessage: message,
       steps: [{ text: `SQL generation failed: ${message}`, at: new Date().toISOString() }],
     };
   }
@@ -77,7 +107,7 @@ export async function generateSqlNode(request: AgentRunRequest, state: GraphStat
 }
 
 export async function executeSqlNode(request: AgentRunRequest, state: GraphStateValue) {
-  if (state.cacheHit || !state.sql) {
+  if (state.cacheHit || state.intentKind === "small_talk" || state.errorMessage || !state.sql) {
     return {};
   }
 
@@ -90,6 +120,7 @@ export async function executeSqlNode(request: AgentRunRequest, state: GraphState
       const result = await executeReadOnlyQuery(request.database, sql);
       return {
         sql,
+        rowCount: result.rowCount,
         rows: result.rows,
         columns: result.columns,
         steps: [{ text: "Executing SQL against the selected database...", at: new Date().toISOString() }],
@@ -114,6 +145,7 @@ export async function executeSqlNode(request: AgentRunRequest, state: GraphState
       if (attempt === MAX_ATTEMPTS - 1) {
         return {
           sql,
+          rowCount: 0,
           rows: [],
           columns: [],
           answer: `I wasn't able to generate valid SQL for this question after ${MAX_ATTEMPTS} attempts. The last error was: ${message}. Please try rephrasing your question.`,
@@ -124,7 +156,10 @@ export async function executeSqlNode(request: AgentRunRequest, state: GraphState
 
       const repaired = await invokeJson<{ sql: string }>({
         llm: request.llm,
-        systemPrompt: buildSqlRepairPrompt(request.knowledge, sql, message),
+        systemPrompt: buildSqlRepairPrompt(request.knowledge, sql, message, {
+          wantsVisualization: state.wantsVisualization,
+          needsImplicitCountMetric: state.needsImplicitCountMetric,
+        }),
         userPrompt: `Original question: ${request.message}`,
         history: request.history,
         temperature: 0.1,
@@ -137,8 +172,18 @@ export async function executeSqlNode(request: AgentRunRequest, state: GraphState
 }
 
 export async function composeAnswerNode(request: AgentRunRequest, state: GraphStateValue) {
-  if (state.cacheHit || state.rows.length === 0) {
-    return state.cacheHit ? {} : { answer: "The query ran but returned no rows." };
+  if (state.cacheHit || state.intentKind === "small_talk" || state.errorMessage) {
+    return {};
+  }
+
+  if (state.rows.length === 0) {
+    return {
+      answer: buildNoRowsAnswer({
+        question: request.message,
+        sql: state.sql,
+      }),
+      steps: [{ text: "The query completed, but no matching rows were found.", at: new Date().toISOString() }],
+    };
   }
 
   const { content, tokenUsage } = await invokeText({
@@ -161,6 +206,18 @@ export async function composeAnswerNode(request: AgentRunRequest, state: GraphSt
 
 export async function planChartNode(request: AgentRunRequest, state: GraphStateValue) {
   if (state.cacheHit || state.rows.length === 0) {
+    return {};
+  }
+
+  const autoChartAllowed =
+    state.intentKind === "explicit_visualization" ||
+    shouldAutoPlanChart({
+      question: request.message,
+      columns: state.columns,
+      rows: state.rows,
+    });
+
+  if (!autoChartAllowed) {
     return {};
   }
 
@@ -212,6 +269,8 @@ export async function planChartNode(request: AgentRunRequest, state: GraphStateV
         title: value.title,
         xField: value.xField,
         yField: value.kind === "histogram" ? value.xField : value.yField,
+        xLabel: toReadableLabel(value.xField),
+        yLabel: toReadableLabel(value.kind === "histogram" ? value.xField : value.yField),
         data: state.rows.slice(0, 20),
       },
       steps: [{ text: "Planning a D3 visualization...", at: new Date().toISOString() }],
@@ -230,7 +289,7 @@ export async function planChartNode(request: AgentRunRequest, state: GraphStateV
 }
 
 export async function generateSuggestionsNode(request: AgentRunRequest, state: GraphStateValue) {
-  if (state.cacheHit) {
+  if (state.cacheHit || state.intentKind === "small_talk" || !state.answer) {
     return {};
   }
 

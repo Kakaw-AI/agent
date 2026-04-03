@@ -43,11 +43,12 @@ export async function executeReadOnlyQuery(
     const db = openSqlite(database);
     try {
       const statement = db.prepare(sql);
+      const columns = statement.columns().map((column) => column.name);
       const rows = statement.all() as Array<Record<string, unknown>>;
       const safeRows = rows.slice(0, MAX_RESULT_ROWS).map(sanitizeRow);
       return {
         rowCount: rows.length,
-        columns: safeRows[0] ? Object.keys(safeRows[0]) : [],
+        columns,
         rows: safeRows,
       };
     } finally {
