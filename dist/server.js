@@ -1,0 +1,69 @@
+import { createServer } from "node:http";
+import { verifyIncomingSignature } from "./auth.js";
+import { syncDatabase } from "./database.js";
+import { toErrorInfo } from "./errors.js";
+import { runAgent } from "./graph.js";
+const host = process.env.HOST?.trim() || "0.0.0.0";
+const port = Number(process.env.PORT ?? 8000);
+const server = createServer(async (request, response) => {
+    try {
+        if (request.method === "GET" && request.url === "/healthz") {
+            writeJson(response, 200, { status: "ok" });
+            return;
+        }
+        if (request.method !== "POST") {
+            writeJson(response, 404, { error: { message: "Not found." } });
+            return;
+        }
+        const rawBody = await readBody(request);
+        verifyIncomingSignature(headerValue(request.headers["x-kakaw-request-timestamp"]), headerValue(request.headers["x-kakaw-signature"]), rawBody);
+        if (request.url === "/api/chat/sync") {
+            const payload = JSON.parse(rawBody);
+            writeJson(response, 200, await syncDatabase(payload.database));
+            return;
+        }
+        if (request.url === "/api/chat/run") {
+            const payload = JSON.parse(rawBody);
+            const events = await runAgent(payload);
+            response.writeHead(200, {
+                "content-type": "application/x-ndjson; charset=utf-8",
+                "cache-control": "no-cache, no-transform",
+                connection: "keep-alive",
+            });
+            for (const event of events) {
+                response.write(`${JSON.stringify(event)}\n`);
+            }
+            response.end();
+            return;
+        }
+        writeJson(response, 404, { error: { message: "Not found." } });
+    }
+    catch (error) {
+        const info = toErrorInfo(error);
+        writeJson(response, info.statusCode, { error: info });
+    }
+});
+server.listen(port, host, () => {
+    // eslint-disable-next-line no-console
+    console.log(`agent-ts listening on http://${host}:${port}`);
+});
+function readBody(request) {
+    return new Promise((resolve, reject) => {
+        const chunks = [];
+        request.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+        request.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+        request.on("error", reject);
+    });
+}
+function writeJson(response, statusCode, payload) {
+    response.writeHead(statusCode, {
+        "content-type": "application/json; charset=utf-8",
+    });
+    response.end(JSON.stringify(payload));
+}
+function headerValue(value) {
+    if (Array.isArray(value)) {
+        return value[0] ?? null;
+    }
+    return value ?? null;
+}
