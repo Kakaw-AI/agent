@@ -1,26 +1,41 @@
-import { LruCache } from "../cache.js";
-import { invokeJson, invokeText } from "../llm/index.js";
+// agent-ts/src/graph/nodes.ts
+
 import { executeReadOnlyQuery } from "../database/index.js";
-import { buildSqlSystemPrompt, buildSqlRepairPrompt } from "./prompts.js";
-import type { GraphStateValue } from "./state.js";
+import { buildFailurePresentation } from "../errors.js";
+import { buildDirectAnswer, buildNoRowsAnswer } from "../llm/answers.js";
+import { invokeJson, invokeText } from "../llm/index.js";
+import { AnswerPromptBuilder } from "../prompts/AnswerPromptBuilder.js";
+import { ChartPlanPromptBuilder } from "../prompts/ChartPlanPromptBuilder.js";
+import type { BaseSqlPromptBuilder } from "../prompts/SqlPromptBuilder.js";
+import { PostgresSqlPromptBuilder } from "../prompts/database/PostgresSqlPromptBuilder.js";
+import { SqliteSqlPromptBuilder } from "../prompts/database/SqliteSqlPromptBuilder.js";
+import { SuggestionsPromptBuilder } from "../prompts/SuggestionsPromptBuilder.js";
+import { VisualizationSqlUserPromptBuilder } from "../prompts/VisualizationSqlUserPromptBuilder.js";
 import type { AgentRunRequest, TokenUsage } from "../types.js";
+import { toReadableLabel } from "../utils/text.js";
+import { mergeTokenUsage } from "../utils/token.js";
+import { buildFallbackChartSpec, planChartSpecDeterministically } from "./chart-spec.js";
 import {
-  buildDirectAnswer,
-  buildNoRowsAnswer,
   classifyIntentHeuristically,
+  collectDerivedDimensionKeys,
   needsImplicitCountMetric as shouldUseImplicitCountMetric,
   shouldAutoPlanChart,
-  toReadableLabel,
-} from "./policy.js";
+} from "./intent.js";
+import { assessVisualizationSqlDraft, buildVisualizationSqlExhaustedOutcome } from "./sql/assessment.js";
+import type { GraphStateValue } from "./state.js";
+import type { ChartPlanLlmResponse } from "./types.js";
+import {
+  buildVisualizationNarrowingAnswer,
+  decideVisualizationCapability,
+  validateVisualizationResult,
+} from "./visualization.js";
 
-export const responseCache = new LruCache<{
-  sql: string;
-  rows: Array<Record<string, unknown>>;
-  columns: string[];
-  answer: string;
-  chartSpec: Record<string, unknown> | null;
-  suggestions: string[];
-}>(200, 5 * 60 * 1000);
+function createSqlPromptBuilder(provider: string): BaseSqlPromptBuilder {
+  if (provider === "sqlite") {
+    return new SqliteSqlPromptBuilder();
+  }
+  return new PostgresSqlPromptBuilder();
+}
 
 export async function loadCacheNode(request: AgentRunRequest, _state: GraphStateValue) {
   return {
@@ -33,7 +48,7 @@ export async function classifyIntentNode(request: AgentRunRequest, state: GraphS
     return {};
   }
 
-  const intent = classifyIntentHeuristically(request.message);
+  const intent = classifyIntentHeuristically(request.message, request.history);
   const availableColumns = request.knowledge.tables.flatMap((table) =>
     table.columns.map((column) => column.name),
   );
@@ -43,6 +58,8 @@ export async function classifyIntentNode(request: AgentRunRequest, state: GraphS
     return {
       intentKind: intent.kind,
       wantsVisualization: intent.wantsVisualization,
+      visualizationRequest: null,
+      visualizationCapabilityDecision: null,
       needsImplicitCountMetric,
       answer: buildDirectAnswer(request.message),
       suggestions: [],
@@ -53,6 +70,8 @@ export async function classifyIntentNode(request: AgentRunRequest, state: GraphS
   return {
     intentKind: intent.kind,
     wantsVisualization: intent.wantsVisualization,
+    visualizationRequest: intent.visualizationRequest,
+    visualizationCapabilityDecision: decideVisualizationCapability(intent.visualizationRequest),
     needsImplicitCountMetric,
   };
 }
@@ -62,48 +81,76 @@ export async function generateSqlNode(request: AgentRunRequest, state: GraphStat
     return {};
   }
 
-  let value: { sql: string; rationale?: string };
-  let tokenUsage: TokenUsage | null;
-  try {
-    const result = await invokeJson<{ sql: string; rationale?: string }>({
-      llm: request.llm,
-      systemPrompt: buildSqlSystemPrompt(request.knowledge, {
-        wantsVisualization: state.wantsVisualization,
-        needsImplicitCountMetric: state.needsImplicitCountMetric,
-      }),
-      userPrompt: [
-        `Question: ${request.message}`,
-        state.needsImplicitCountMetric
-          ? "The chart should use COUNT(*) grouped by the requested category unless the user explicitly asked for a different metric."
-          : null,
-      ]
-        .filter(Boolean)
-        .join("\n"),
-      history: request.history,
-      temperature: 0.1,
-    });
-    value = result.value;
-    tokenUsage = result.tokenUsage;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "SQL generation failed.";
-    return {
-      errorMessage: message,
-      steps: [{ text: `SQL generation failed: ${message}`, at: new Date().toISOString() }],
-    };
+  const sqlPromptBuilder = createSqlPromptBuilder(request.database.provider);
+  const userPromptBuilder = new VisualizationSqlUserPromptBuilder();
+  let tokenUsage: TokenUsage | null = null;
+  let lastSql = "";
+  let lastRationale: string | null = null;
+  let priorErrors: string[] = [];
+  const MAX_DRAFT_ATTEMPTS = 3;
+
+  for (let attempt = 0; attempt < MAX_DRAFT_ATTEMPTS; attempt += 1) {
+    try {
+      const result = await invokeJson<{ sql: string; rationale?: string }>({
+        llm: request.llm,
+        systemPrompt: sqlPromptBuilder.build({
+          knowledge: request.knowledge,
+          options: {
+            wantsVisualization: state.wantsVisualization,
+            needsImplicitCountMetric: state.needsImplicitCountMetric,
+            visualizationRequest: state.visualizationRequest,
+            derivedDimensionKeys: collectDerivedDimensionKeys(
+              request.message,
+              state.visualizationRequest,
+            ),
+          },
+        }),
+        userPrompt: userPromptBuilder.build({
+          question: request.message,
+          visualizationRequest: state.visualizationRequest,
+          needsImplicitCountMetric: state.needsImplicitCountMetric,
+          priorSql: attempt > 0 ? lastSql : null,
+          priorErrors,
+        }),
+        history: request.history,
+        temperature: 0.1,
+      });
+
+      tokenUsage = mergeTokenUsage(tokenUsage, result.tokenUsage);
+      lastSql = result.value.sql.trim();
+      lastRationale = result.value.rationale ?? null;
+
+      const assessment = assessVisualizationSqlDraft({
+        sql: lastSql,
+        visualizationRequest: state.wantsVisualization ? state.visualizationRequest : null,
+      });
+
+      if (assessment.ok) {
+        return {
+          sql: lastSql,
+          tokenUsage,
+          visualizationValidationStatus:
+            state.wantsVisualization && state.visualizationRequest
+              ? "pending"
+              : state.visualizationValidationStatus,
+          steps: [{ text: "Generating read-only SQL...", at: new Date().toISOString() }],
+          toolCalls: [{ tool: "sql_generation", sql: lastSql, rationale: lastRationale }],
+        };
+      }
+
+      priorErrors = assessment.errors;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "SQL generation failed.";
+      const failure = buildFailurePresentation(message);
+      return {
+        errorMessage: message,
+        publicErrorMessage: failure.publicMessage,
+        steps: [{ text: failure.stepText, at: new Date().toISOString() }],
+      };
+    }
   }
 
-  return {
-    sql: value.sql.trim(),
-    tokenUsage,
-    steps: [{ text: "Generating read-only SQL...", at: new Date().toISOString() }],
-    toolCalls: [
-      {
-        tool: "sql_generation",
-        sql: value.sql.trim(),
-        rationale: value.rationale ?? null,
-      },
-    ],
-  };
+  return buildVisualizationSqlExhaustedOutcome(priorErrors);
 }
 
 export async function executeSqlNode(request: AgentRunRequest, state: GraphStateValue) {
@@ -111,36 +158,172 @@ export async function executeSqlNode(request: AgentRunRequest, state: GraphState
     return {};
   }
 
+  const sqlPromptBuilder = createSqlPromptBuilder(request.database.provider);
+  const userPromptBuilder = new VisualizationSqlUserPromptBuilder();
   let sql = state.sql;
   const repairHistory: Array<Record<string, unknown>> = [];
-
   const MAX_ATTEMPTS = 3;
+
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+    const plausibility = assessVisualizationSqlDraft({
+      sql,
+      visualizationRequest: state.wantsVisualization ? state.visualizationRequest : null,
+    });
+
+    if (!plausibility.ok) {
+      repairHistory.push({ stage: "sql_plausibility", attempt: attempt + 1, sql, errors: plausibility.errors });
+
+      if (attempt === MAX_ATTEMPTS - 1) {
+        return {
+          sql,
+          rowCount: 0,
+          rows: [],
+          columns: [],
+          answer: "I couldn't produce SQL for this visualization that preserved all requested fields. Please narrow the request or rephrase it.",
+          repairHistory,
+          visualizationValidationStatus: "invalid",
+          visualizationValidationErrors: plausibility.errors,
+          narrowedVisualizationReason: "The SQL draft was missing requested visualization fields.",
+          steps: [{ text: "Stopped before execution because the SQL draft dropped requested visualization fields.", at: new Date().toISOString() }],
+        };
+      }
+
+      const repaired = await invokeJson<{ sql: string }>({
+        llm: request.llm,
+        systemPrompt: sqlPromptBuilder.build({
+          knowledge: request.knowledge,
+          repair: { sql, error: plausibility.errors.join(" ") },
+          options: {
+            wantsVisualization: state.wantsVisualization,
+            needsImplicitCountMetric: state.needsImplicitCountMetric,
+            visualizationRequest: state.visualizationRequest,
+            derivedDimensionKeys: collectDerivedDimensionKeys(request.message, state.visualizationRequest),
+          },
+        }),
+        userPrompt: userPromptBuilder.build({
+          question: request.message,
+          visualizationRequest: state.visualizationRequest,
+          needsImplicitCountMetric: state.needsImplicitCountMetric,
+          priorSql: sql,
+          priorErrors: plausibility.errors,
+        }),
+        history: request.history,
+        temperature: 0.1,
+      });
+      sql = repaired.value.sql.trim();
+      continue;
+    }
+
     try {
       const result = await executeReadOnlyQuery(request.database, sql);
+      const validation =
+        state.wantsVisualization && state.visualizationRequest
+          ? validateVisualizationResult({
+              request: state.visualizationRequest,
+              capabilityDecision:
+                state.visualizationCapabilityDecision ??
+                decideVisualizationCapability(state.visualizationRequest),
+              columns: result.columns,
+              rows: result.rows,
+            })
+          : null;
+
+      if (validation && validation.status !== "valid") {
+        repairHistory.push({
+          stage: "visualization_result_validation",
+          attempt: attempt + 1,
+          sql,
+          errors: validation.errors,
+          droppedFields: validation.droppedFields,
+        });
+
+        if (validation.status === "narrowed") {
+          return {
+            sql,
+            rowCount: result.rowCount,
+            rows: result.rows,
+            columns: result.columns,
+            answer: buildVisualizationNarrowingAnswer({
+              request: state.visualizationRequest,
+              reason: validation.errors[0] ?? state.visualizationCapabilityDecision?.reason ?? null,
+              validation,
+            }),
+            repairHistory,
+            visualizationValidationStatus: validation.status,
+            visualizationValidationErrors: validation.errors,
+            visualizationValidationNarrowedFrom: validation.narrowedFrom,
+            visualizationValidationDroppedFields: validation.droppedFields,
+            narrowedVisualizationReason:
+              validation.errors[0] ??
+              state.visualizationCapabilityDecision?.reason ??
+              "The requested visual needed narrowing after result validation.",
+            steps: [{ text: "Executed SQL, then narrowed the visualization because the result shape was unsupported for rendering.", at: new Date().toISOString() }],
+            toolCalls: [{ tool: "sql_execution", sql, rowCount: result.rowCount }],
+          };
+        }
+
+        if (attempt === MAX_ATTEMPTS - 1) {
+          return {
+            sql,
+            rowCount: 0,
+            rows: [],
+            columns: [],
+            answer: "I couldn't produce a visualization-ready result that preserved all requested fields. Please narrow the request or rephrase it.",
+            repairHistory,
+            visualizationValidationStatus: validation.status,
+            visualizationValidationErrors: validation.errors,
+            visualizationValidationNarrowedFrom: validation.narrowedFrom,
+            visualizationValidationDroppedFields: validation.droppedFields,
+            narrowedVisualizationReason: "The executed query returned a result shape that dropped requested visualization fields.",
+            steps: [{ text: "Executed SQL, but the result shape did not satisfy the requested visualization fields.", at: new Date().toISOString() }],
+          };
+        }
+
+        const repaired = await invokeJson<{ sql: string }>({
+          llm: request.llm,
+          systemPrompt: sqlPromptBuilder.build({
+            knowledge: request.knowledge,
+            repair: {
+              sql,
+              error: `The result shape was invalid for the visualization: ${validation.errors.join(" ")}`,
+            },
+            options: {
+              wantsVisualization: state.wantsVisualization,
+              needsImplicitCountMetric: state.needsImplicitCountMetric,
+              visualizationRequest: state.visualizationRequest,
+              derivedDimensionKeys: collectDerivedDimensionKeys(request.message, state.visualizationRequest),
+            },
+          }),
+          userPrompt: userPromptBuilder.build({
+            question: request.message,
+            visualizationRequest: state.visualizationRequest,
+            needsImplicitCountMetric: state.needsImplicitCountMetric,
+            priorSql: sql,
+            priorErrors: validation.errors,
+          }),
+          history: request.history,
+          temperature: 0.1,
+        });
+        sql = repaired.value.sql.trim();
+        continue;
+      }
+
       return {
         sql,
         rowCount: result.rowCount,
         rows: result.rows,
         columns: result.columns,
+        visualizationValidationStatus: validation?.status ?? state.visualizationValidationStatus,
+        visualizationValidationErrors: validation?.errors ?? [],
+        visualizationValidationNarrowedFrom: validation?.narrowedFrom ?? [],
+        visualizationValidationDroppedFields: validation?.droppedFields ?? [],
         steps: [{ text: "Executing SQL against the selected database...", at: new Date().toISOString() }],
-        toolCalls: [
-          {
-            tool: "sql_execution",
-            sql,
-            rowCount: result.rowCount,
-          },
-        ],
+        toolCalls: [{ tool: "sql_execution", sql, rowCount: result.rowCount }],
         repairHistory,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : "SQL execution failed.";
-      repairHistory.push({
-        stage: "sql_execution",
-        attempt: attempt + 1,
-        sql,
-        error: message,
-      });
+      repairHistory.push({ stage: "sql_execution", attempt: attempt + 1, sql, error: message });
 
       if (attempt === MAX_ATTEMPTS - 1) {
         return {
@@ -156,9 +339,15 @@ export async function executeSqlNode(request: AgentRunRequest, state: GraphState
 
       const repaired = await invokeJson<{ sql: string }>({
         llm: request.llm,
-        systemPrompt: buildSqlRepairPrompt(request.knowledge, sql, message, {
-          wantsVisualization: state.wantsVisualization,
-          needsImplicitCountMetric: state.needsImplicitCountMetric,
+        systemPrompt: sqlPromptBuilder.build({
+          knowledge: request.knowledge,
+          repair: { sql, error: message },
+          options: {
+            wantsVisualization: state.wantsVisualization,
+            needsImplicitCountMetric: state.needsImplicitCountMetric,
+            visualizationRequest: state.visualizationRequest,
+            derivedDimensionKeys: collectDerivedDimensionKeys(request.message, state.visualizationRequest),
+          },
         }),
         userPrompt: `Original question: ${request.message}`,
         history: request.history,
@@ -176,23 +365,26 @@ export async function composeAnswerNode(request: AgentRunRequest, state: GraphSt
     return {};
   }
 
+  if (typeof state.answer === "string" && state.answer.trim()) {
+    return {};
+  }
+
   if (state.rows.length === 0) {
     return {
-      answer: buildNoRowsAnswer({
-        question: request.message,
-        sql: state.sql,
-      }),
+      answer: buildNoRowsAnswer({ question: request.message, sql: state.sql }),
       steps: [{ text: "The query completed, but no matching rows were found.", at: new Date().toISOString() }],
     };
   }
 
+  const prompt = new AnswerPromptBuilder().build({
+    question: request.message,
+    columns: state.columns,
+    rows: state.rows,
+  });
+
   const { content, tokenUsage } = await invokeText({
     llm: request.llm,
-    systemPrompt:
-      "You are a database analyst. Answer the user's question using only the SQL results provided. Be concise and precise.",
-    userPrompt: `Question: ${request.message}\n\nColumns: ${state.columns.join(", ")}\nRows: ${JSON.stringify(
-      state.rows.slice(0, 25),
-    )}`,
+    ...prompt,
     history: request.history,
     temperature: 0.2,
   });
@@ -204,18 +396,24 @@ export async function composeAnswerNode(request: AgentRunRequest, state: GraphSt
   };
 }
 
-export async function planChartNode(request: AgentRunRequest, state: GraphStateValue) {
-  if (state.cacheHit || state.rows.length === 0) {
+export async function planChartNode(
+  request: AgentRunRequest,
+  state: GraphStateValue,
+  deps: { invokeJsonFn?: typeof invokeJson } = {},
+) {
+  if (
+    state.cacheHit ||
+    state.rows.length === 0 ||
+    state.visualizationValidationStatus === "invalid" ||
+    state.visualizationValidationStatus === "narrowed"
+  ) {
     return {};
   }
 
   const autoChartAllowed =
     state.intentKind === "explicit_visualization" ||
-    shouldAutoPlanChart({
-      question: request.message,
-      columns: state.columns,
-      rows: state.rows,
-    });
+    state.intentKind === "visualization_followup" ||
+    shouldAutoPlanChart({ question: request.message, columns: state.columns, rows: state.rows });
 
   if (!autoChartAllowed) {
     return {};
@@ -232,35 +430,53 @@ export async function planChartNode(request: AgentRunRequest, state: GraphStateV
     return {};
   }
 
+  const deterministicChartSpec = planChartSpecDeterministically({
+    question: request.message,
+    columns: state.columns,
+    rows: state.rows,
+    visualizationRequest: state.visualizationRequest,
+  });
+
+  if (deterministicChartSpec) {
+    return {
+      chartSpec: deterministicChartSpec,
+      steps: [{ text: "Planning a D3 visualization...", at: new Date().toISOString() }],
+      toolCalls: [{
+        tool: "chart_planning",
+        kind: deterministicChartSpec.kind,
+        xField: deterministicChartSpec.xField,
+        yField: deterministicChartSpec.yField,
+        seriesField: deterministicChartSpec.seriesField ?? null,
+        stacked: deterministicChartSpec.stacked ?? false,
+        planner: "deterministic",
+      }],
+    };
+  }
+
+  const prompt = new ChartPlanPromptBuilder().build({
+    question: request.message,
+    columns: state.columns,
+    numericColumns,
+    labelColumns,
+    rows: state.rows,
+  });
+
   try {
-    const { value } = await invokeJson<{
-      kind: "bar" | "line" | "pie" | "scatter" | "histogram";
-      title: string;
-      xField: string;
-      yField: string;
-    }>({
+    const invokeJsonFn = deps.invokeJsonFn ?? invokeJson;
+    const { value } = await invokeJsonFn<ChartPlanLlmResponse>({
       llm: request.llm,
-      systemPrompt: [
-        "You plan D3 visualizations. Pick the best chart type from: bar, line, pie, scatter, histogram.",
-        "Guidelines:",
-        "- bar: categorical x-axis, numeric y-axis (comparisons, rankings)",
-        "- line: ordered/time x-axis, numeric y-axis (trends over time or sequence)",
-        "- pie: one categorical + one numeric column, 8 or fewer categories (part-of-whole)",
-        "- scatter: two numeric columns (correlation, distribution of two variables)",
-        "- histogram: one numeric column, show distribution (use xField only; set yField same as xField)",
-        "Use only field names that exist in the result set.",
-        `Available columns: ${state.columns.join(", ")}`,
-        `Numeric columns: ${numericColumns.join(", ")}`,
-        `Label columns: ${labelColumns.join(", ")}`,
-      ].join("\n"),
-      userPrompt: `Question: ${request.message}\nRows sample: ${JSON.stringify(state.rows.slice(0, 10))}`,
+      ...prompt,
       temperature: 0.1,
     });
 
     const xValid = state.columns.includes(value.xField);
     const yValid = value.kind === "histogram" || state.columns.includes(value.yField);
+
     if (!xValid || !yValid) {
-      return {};
+      return {
+        chartSpec: buildFallbackChartSpec({ question: request.message, columns: state.columns, rows: state.rows }),
+        steps: [{ text: "Planning a D3 visualization...", at: new Date().toISOString() }],
+      };
     }
 
     return {
@@ -274,17 +490,13 @@ export async function planChartNode(request: AgentRunRequest, state: GraphStateV
         data: state.rows.slice(0, 20),
       },
       steps: [{ text: "Planning a D3 visualization...", at: new Date().toISOString() }],
-      toolCalls: [
-        {
-          tool: "chart_planning",
-          kind: value.kind,
-          xField: value.xField,
-          yField: value.yField,
-        },
-      ],
+      toolCalls: [{ tool: "chart_planning", kind: value.kind, xField: value.xField, yField: value.yField, planner: "llm_fallback" }],
     };
   } catch {
-    return {};
+    return {
+      chartSpec: buildFallbackChartSpec({ question: request.message, columns: state.columns, rows: state.rows }),
+      steps: [{ text: "Planning a D3 visualization...", at: new Date().toISOString() }],
+    };
   }
 }
 
@@ -293,18 +505,17 @@ export async function generateSuggestionsNode(request: AgentRunRequest, state: G
     return {};
   }
 
-  const tableNames = request.knowledge.tables.map((t) => t.name).join(", ");
+  const prompt = new SuggestionsPromptBuilder().build({
+    question: request.message,
+    answer: state.answer,
+    tableNames: request.knowledge.tables.map((t) => t.name).join(", "),
+    summary: request.knowledge.summary,
+  });
 
   try {
     const { value } = await invokeJson<string[]>({
       llm: request.llm,
-      systemPrompt: [
-        "You are a database analyst. Given the user's question, the answer, and the database schema,",
-        "suggest three short follow-up questions that CAN be answered using the available tables.",
-        `Available tables: ${tableNames}`,
-        "Return a JSON array of exactly 3 strings. Each suggestion must reference only the available tables.",
-      ].join("\n"),
-      userPrompt: `Question: ${request.message}\nAnswer: ${state.answer}\nKnowledge summary: ${request.knowledge.summary}`,
+      ...prompt,
       history: request.history,
       temperature: 0.5,
     });
