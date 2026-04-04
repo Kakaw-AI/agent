@@ -1,21 +1,12 @@
 import { invokeJson } from "../../llm/invoke.js";
 import { assessVisualizationSqlDraft, buildVisualizationSqlExhaustedOutcome } from "../../graph/qa/assessment.js";
 import { buildFailurePresentation } from "../../errors.js";
-import { PostgresSqlPromptBuilder } from "../../prompts/database/PostgresSqlPromptBuilder.js";
-import { SqliteSqlPromptBuilder } from "../../prompts/database/SqliteSqlPromptBuilder.js";
-import type { BaseSqlPromptBuilder } from "../../prompts/SqlPromptBuilder.js";
 import { VisualizationSqlUserPromptBuilder } from "../../prompts/VisualizationSqlUserPromptBuilder.js";
+import { createSqlPromptBuilder } from "./shared.js";
 import { mergeTokenUsage } from "../../utils/token.js";
 import type { GraphStateValue } from "../../graph/state.js";
 import type { AgentRunRequest, TokenUsage } from "../../types.js";
 import { AgentLayer } from "../AgentLayer.js";
-
-function createSqlPromptBuilder(provider: string): BaseSqlPromptBuilder {
-  if (provider === "sqlite") {
-    return new SqliteSqlPromptBuilder();
-  }
-  return new PostgresSqlPromptBuilder();
-}
 
 export class SqlGenerationLayer extends AgentLayer {
   readonly name = "generateSql";

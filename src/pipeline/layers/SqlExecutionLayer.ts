@@ -1,10 +1,8 @@
 import { executeReadOnlyQuery } from "../../database/index.js";
 import { invokeJson } from "../../llm/invoke.js";
 import { assessVisualizationSqlDraft } from "../../graph/qa/assessment.js";
-import { PostgresSqlPromptBuilder } from "../../prompts/database/PostgresSqlPromptBuilder.js";
-import { SqliteSqlPromptBuilder } from "../../prompts/database/SqliteSqlPromptBuilder.js";
-import type { BaseSqlPromptBuilder } from "../../prompts/SqlPromptBuilder.js";
 import { VisualizationSqlUserPromptBuilder } from "../../prompts/VisualizationSqlUserPromptBuilder.js";
+import { createSqlPromptBuilder } from "./shared.js";
 import {
   decideVisualizationCapability,
   validateVisualizationResult,
@@ -13,13 +11,6 @@ import {
 import type { GraphStateValue } from "../../graph/state.js";
 import type { AgentRunRequest } from "../../types.js";
 import { AgentLayer } from "../AgentLayer.js";
-
-function createSqlPromptBuilder(provider: string): BaseSqlPromptBuilder {
-  if (provider === "sqlite") {
-    return new SqliteSqlPromptBuilder();
-  }
-  return new PostgresSqlPromptBuilder();
-}
 
 export class SqlExecutionLayer extends AgentLayer {
   readonly name = "executeSql";

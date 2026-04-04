@@ -1,7 +1,7 @@
 import { StateGraph } from "@langchain/langgraph";
 import type { GraphStateValue } from "../graph/state.js";
 import { GraphState } from "../graph/state.js";
-import type { AgentRunRequest, AgentStreamEvent, TokenUsage, VisualizationOutcome, TraceAnalyticsOutcome, VisualizationChartSpec } from "../types.js";
+import type { AgentRunRequest, AgentStreamEvent, VisualizationOutcome, TraceAnalyticsOutcome } from "../types.js";
 import type { AgentLayer, EdgeDef, LayerMap } from "./AgentLayer.js";
 import { EdgeBuilder } from "./AgentLayer.js";
 
@@ -14,7 +14,7 @@ export class AgentPipeline {
   }
 
   /** Exposed for testing — builds the node handler with skip wrapping. */
-  buildNodeHandler(
+  protected buildNodeHandler(
     layer: AgentLayer,
     request?: AgentRunRequest,
   ): (state: GraphStateValue) => Promise<Partial<GraphStateValue>> {
