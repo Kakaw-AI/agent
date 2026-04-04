@@ -37,7 +37,7 @@ function createSqlPromptBuilder(provider: string): BaseSqlPromptBuilder {
   return new PostgresSqlPromptBuilder();
 }
 
-export async function loadCacheNode(request: AgentRunRequest, _state: GraphStateValue) {
+export async function loadCacheNode(_request: AgentRunRequest, _state: GraphStateValue) {
   return {
     steps: [{ text: "Loading indexed schema context...", at: new Date().toISOString() }],
   };
@@ -357,7 +357,15 @@ export async function executeSqlNode(request: AgentRunRequest, state: GraphState
     }
   }
 
-  return {};
+  return {
+    sql,
+    rowCount: 0,
+    rows: [],
+    columns: [],
+    answer: `I wasn't able to execute valid SQL for this question after ${MAX_ATTEMPTS} attempts. Please try rephrasing your question.`,
+    repairHistory,
+    steps: [{ text: `SQL execution failed after ${MAX_ATTEMPTS} attempts.`, at: new Date().toISOString() }],
+  };
 }
 
 export async function composeAnswerNode(request: AgentRunRequest, state: GraphStateValue) {
