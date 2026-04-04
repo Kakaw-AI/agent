@@ -1,10 +1,10 @@
 // agent-ts/src/graph/sql/parser.ts
 
-export function normalizeSqlIdentifier(value: string) {
+export function normalizeSqlIdentifier(value: string): string {
   return value.trim().replace(/^["'`]+|["'`]+$/g, "").toLowerCase().replace(/\s+/g, "_");
 }
 
-export function splitSqlSelectList(selectClause: string) {
+export function splitSqlSelectList(selectClause: string): string[] {
   const items: string[] = [];
   let current = "";
   let depth = 0;
@@ -34,11 +34,11 @@ export function splitSqlSelectList(selectClause: string) {
   return items;
 }
 
-export function isIdentifierBoundary(char: string | undefined) {
+export function isIdentifierBoundary(char: string | undefined): boolean {
   return !char || !/[a-z0-9_]/i.test(char);
 }
 
-export function findKeywordAtTopLevel(sql: string, keyword: string, startIndex = 0) {
+export function findKeywordAtTopLevel(sql: string, keyword: string, startIndex = 0): number {
   const normalizedKeyword = keyword.toLowerCase();
   let depth = 0;
   let inSingleQuote = false;
@@ -95,7 +95,7 @@ export function findKeywordAtTopLevel(sql: string, keyword: string, startIndex =
   return -1;
 }
 
-export function extractFinalSelectClause(sql: string) {
+export function extractFinalSelectClause(sql: string): string | null {
   let searchIndex = 0;
   let lastTopLevelSelect = -1;
 
@@ -121,7 +121,7 @@ export function extractFinalSelectClause(sql: string) {
   return sql.slice(lastTopLevelSelect + "select".length, fromIndex);
 }
 
-export function inferSqlSelectAlias(selectItem: string) {
+export function inferSqlSelectAlias(selectItem: string): string | null {
   const asMatch = selectItem.match(/\bas\s+("?[\w ]+"?)\s*$/i);
   if (asMatch?.[1]) {
     return asMatch[1].trim();
