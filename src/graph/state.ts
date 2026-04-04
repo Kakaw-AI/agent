@@ -1,25 +1,15 @@
 import { Annotation } from "@langchain/langgraph";
-import type { TokenUsage } from "../types.js";
-import type { IntentKind } from "./policy.js";
-
-function mergeTokenUsage(left: TokenUsage | null, right: TokenUsage | null) {
-  if (!left) {
-    return right;
-  }
-  if (!right) {
-    return left;
-  }
-
-  return {
-    inputTokens: left.inputTokens + right.inputTokens,
-    outputTokens: left.outputTokens + right.outputTokens,
-    totalTokens: left.totalTokens + right.totalTokens,
-  };
-}
+import type { TokenUsage, VisualizationCapabilityDecision, VisualizationChartSpec, VisualizationRequest, VisualizationValidationStatus } from "../types.js";
+import { mergeTokenUsage } from "../utils/token.js";
+import { IntentKind } from "./types.js";
 
 export const GraphState = Annotation.Root({
   sql: Annotation<string>(),
   errorMessage: Annotation<string | null>({
+    reducer: (_left, right) => right,
+    default: () => null,
+  }),
+  publicErrorMessage: Annotation<string | null>({
     reducer: (_left, right) => right,
     default: () => null,
   }),
@@ -36,7 +26,7 @@ export const GraphState = Annotation.Root({
     default: () => [],
   }),
   answer: Annotation<string>(),
-  chartSpec: Annotation<Record<string, unknown> | null>({
+  chartSpec: Annotation<VisualizationChartSpec | null>({
     reducer: (_left, right) => right,
     default: () => null,
   }),
@@ -56,6 +46,34 @@ export const GraphState = Annotation.Root({
   wantsVisualization: Annotation<boolean>({
     reducer: (_left, right) => right,
     default: () => false,
+  }),
+  visualizationRequest: Annotation<VisualizationRequest | null>({
+    reducer: (_left, right) => right,
+    default: () => null,
+  }),
+  visualizationCapabilityDecision: Annotation<VisualizationCapabilityDecision | null>({
+    reducer: (_left, right) => right,
+    default: () => null,
+  }),
+  visualizationValidationStatus: Annotation<VisualizationValidationStatus>({
+    reducer: (_left, right) => right,
+    default: () => "pending",
+  }),
+  visualizationValidationErrors: Annotation<string[]>({
+    reducer: (_left, right) => right,
+    default: () => [],
+  }),
+  visualizationValidationNarrowedFrom: Annotation<string[]>({
+    reducer: (_left, right) => right,
+    default: () => [],
+  }),
+  visualizationValidationDroppedFields: Annotation<string[]>({
+    reducer: (_left, right) => right,
+    default: () => [],
+  }),
+  narrowedVisualizationReason: Annotation<string | null>({
+    reducer: (_left, right) => right,
+    default: () => null,
   }),
   needsImplicitCountMetric: Annotation<boolean>({
     reducer: (_left, right) => right,
