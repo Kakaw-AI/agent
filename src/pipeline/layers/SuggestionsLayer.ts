@@ -3,6 +3,7 @@ import type { GraphStateValue } from "../../llm/state.js";
 import { SuggestionsPromptBuilder } from "../../prompts/SuggestionsPromptBuilder.js";
 import type { AgentRunRequest } from "../../types.js";
 import { AgentLayer } from "../AgentLayer.js";
+import type { LayerContext } from "../AgentLayer.js";
 
 export class SuggestionsLayer extends AgentLayer {
   readonly name = "generateSuggestions";
@@ -11,7 +12,9 @@ export class SuggestionsLayer extends AgentLayer {
     return state.cacheHit || state.intentKind === "small_talk" || !state.answer;
   }
 
-  async execute(request: AgentRunRequest, state: GraphStateValue): Promise<Partial<GraphStateValue>> {
+  async execute(request: AgentRunRequest, state: GraphStateValue, ctx: LayerContext): Promise<Partial<GraphStateValue>> {
+    ctx.emit({ type: "agent_step", data: { text: "Generating follow-up suggestions...", at: new Date().toISOString() } });
+
     const prompt = new SuggestionsPromptBuilder().build({
       question: request.message,
       answer: state.answer,
@@ -25,6 +28,8 @@ export class SuggestionsLayer extends AgentLayer {
         ...prompt,
         history: request.history,
         temperature: 0.5,
+        onLlmCall: ctx.onLlmCall,
+        onLlmResponse: ctx.onLlmResponse,
       });
 
       return {

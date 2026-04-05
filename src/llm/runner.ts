@@ -9,13 +9,17 @@ import {
   SuggestionsLayer,
 } from "../pipeline/index.js";
 
-export async function runAgent(request: AgentRunRequest): Promise<AgentStreamEvent[]> {
+function buildPipeline(): AgentPipeline {
   return new AgentPipeline()
     .use(new IntentLayer())
     .use(new SqlGenerationLayer())
     .use(new SqlExecutionLayer())
     .use(new AnswerLayer())
     .use(new ChartLayer())
-    .use(new SuggestionsLayer())
-    .run(request);
+    .use(new SuggestionsLayer());
 }
+
+export function streamAgent(request: AgentRunRequest): AsyncGenerator<AgentStreamEvent> {
+  return buildPipeline().stream(request);
+}
+

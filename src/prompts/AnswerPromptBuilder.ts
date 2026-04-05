@@ -40,7 +40,7 @@ export class AnswerPromptBuilder {
   } {
     return {
       systemPrompt: AnswerPromptBuilder.SYSTEM_INSTRUCTIONS.join(" "),
-      userPrompt: `Question: ${input.question}\n\nColumns: ${input.columns.join(", ")}\nRows: ${JSON.stringify(input.rows.slice(0, 25))}`,
+      userPrompt: `Question: ${input.question}\n\nColumns: ${input.columns.join(", ")}\nRows: ${JSON.stringify(input.rows)}`,
     };
   }
 }

@@ -1,5 +1,19 @@
 import { AgentHistoryMessage, AgentLlmRuntime, TokenUsage } from "../types.js";
 
+// --- new hook types ---
+export type LlmCallHook = (input: {
+  systemPrompt: string;
+  userPrompt: string;
+  model: string;
+  temperature: number;
+}) => void;
+
+export type LlmResponseHook = (result: {
+  content: string;
+  tokenUsage: TokenUsage | null;
+}) => void;
+// ---------------------
+
 type LLMMessage = {
     message?: {
         content?: string;
@@ -39,6 +53,8 @@ export type InvokeTextInput = {
   userPrompt: string;
   history?: AgentHistoryMessage[];
   temperature?: number;
+  onLlmCall?: LlmCallHook;       // new
+  onLlmResponse?: LlmResponseHook; // new
 };
 
 

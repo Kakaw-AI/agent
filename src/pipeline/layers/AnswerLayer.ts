@@ -4,6 +4,7 @@ import type { GraphStateValue } from "../../llm/state.js";
 import { AnswerPromptBuilder } from "../../prompts/AnswerPromptBuilder.js";
 import type { AgentRunRequest } from "../../types.js";
 import { AgentLayer } from "../AgentLayer.js";
+import type { LayerContext } from "../AgentLayer.js";
 
 export class AnswerLayer extends AgentLayer {
   readonly name = "composeAnswer";
@@ -12,17 +13,20 @@ export class AnswerLayer extends AgentLayer {
     return state.cacheHit || state.intentKind === "small_talk" || !!state.errorMessage;
   }
 
-  async execute(request: AgentRunRequest, state: GraphStateValue): Promise<Partial<GraphStateValue>> {
+  async execute(request: AgentRunRequest, state: GraphStateValue, ctx: LayerContext): Promise<Partial<GraphStateValue>> {
     if (typeof state.answer === "string" && state.answer.trim()) {
       return {};
     }
 
     if (state.rows.length === 0) {
+      ctx.emit({ type: "agent_step", data: { text: "The query completed, but no matching rows were found.", at: new Date().toISOString() } });
       return {
         answer: buildNoRowsAnswer({ question: request.message, sql: state.sql }),
         steps: [{ text: "The query completed, but no matching rows were found.", at: new Date().toISOString() }],
       };
     }
+
+    ctx.emit({ type: "agent_step", data: { text: "Writing the response from query results...", at: new Date().toISOString() } });
 
     const prompt = new AnswerPromptBuilder().build({
       question: request.message,
@@ -35,6 +39,8 @@ export class AnswerLayer extends AgentLayer {
       ...prompt,
       history: request.history,
       temperature: 0.2,
+      onLlmCall: ctx.onLlmCall,
+      onLlmResponse: ctx.onLlmResponse,
     });
 
     return {

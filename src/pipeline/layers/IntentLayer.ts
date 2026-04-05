@@ -4,6 +4,7 @@ import { classifyIntentHeuristically } from "../../llm/intent/classifier.js";
 import type { GraphStateValue } from "../../llm/state.js";
 import type { AgentRunRequest } from "../../types.js";
 import { AgentLayer } from "../AgentLayer.js";
+import type { LayerContext } from "../AgentLayer.js";
 
 export class IntentLayer extends AgentLayer {
   readonly name = "classifyIntent";
@@ -12,10 +13,11 @@ export class IntentLayer extends AgentLayer {
     return state.cacheHit;
   }
 
-  async execute(request: AgentRunRequest, _state: GraphStateValue): Promise<Partial<GraphStateValue>> {
+  async execute(request: AgentRunRequest, _state: GraphStateValue, ctx: LayerContext): Promise<Partial<GraphStateValue>> {
     const intent = classifyIntentHeuristically(request.message, request.history);
 
     if (intent.kind === "small_talk") {
+      ctx.emit({ type: "agent_step", data: { text: "Responding directly without querying the database...", at: new Date().toISOString() } });
       return {
         intentKind: intent.kind,
         wantsVisualization: intent.wantsVisualization,
@@ -27,11 +29,14 @@ export class IntentLayer extends AgentLayer {
       };
     }
 
+    ctx.emit({ type: "agent_step", data: { text: "Classifying intent and visualization requirements...", at: new Date().toISOString() } });
+
     return {
       intentKind: intent.kind,
       wantsVisualization: intent.wantsVisualization,
       visualizationRequest: intent.visualizationRequest,
       visualizationCapabilityDecision: decideVisualizationCapability(intent.visualizationRequest),
+      steps: [{ text: "Classifying intent and visualization requirements...", at: new Date().toISOString() }],
     };
   }
 }

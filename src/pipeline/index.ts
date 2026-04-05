@@ -1,6 +1,8 @@
 export { AgentLayer, EdgeBuilder } from "./AgentLayer.js";
-export type { LayerMap, EdgeDef } from "./AgentLayer.js";
-export { AgentPipeline, buildEventsFromFinalState } from "./AgentPipeline.js";
+export type { LayerMap, EdgeDef, EmitFn, LayerContext } from "./AgentLayer.js";
+export { AgentPipeline } from "./AgentPipeline.js";
+export { PipelineEmitter } from "./PipelineEmitter.js";
+export { PipelineLogger } from "./PipelineLogger.js";
 export { IntentLayer } from "./layers/IntentLayer.js";
 export { SqlGenerationLayer } from "./layers/SqlGenerationLayer.js";
 export { SqlExecutionLayer } from "./layers/SqlExecutionLayer.js";

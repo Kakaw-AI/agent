@@ -10,6 +10,7 @@ import type { GraphStateValue } from "../../llm/state.js";
 import { VisualizationSqlUserPromptBuilder } from "../../prompts/VisualizationSqlUserPromptBuilder.js";
 import type { AgentRunRequest } from "../../types.js";
 import { AgentLayer } from "../AgentLayer.js";
+import type { LayerContext } from "../AgentLayer.js";
 import { createSqlPromptBuilder } from "./shared.js";
 
 export class SqlExecutionLayer extends AgentLayer {
@@ -19,7 +20,7 @@ export class SqlExecutionLayer extends AgentLayer {
     return state.cacheHit || state.intentKind === "small_talk" || !!state.errorMessage || !state.sql;
   }
 
-  async execute(request: AgentRunRequest, state: GraphStateValue): Promise<Partial<GraphStateValue>> {
+  async execute(request: AgentRunRequest, state: GraphStateValue, ctx: LayerContext): Promise<Partial<GraphStateValue>> {
     const sqlPromptBuilder = createSqlPromptBuilder(request.database.provider);
     const userPromptBuilder = new VisualizationSqlUserPromptBuilder();
     let sql = state.sql;
@@ -27,6 +28,12 @@ export class SqlExecutionLayer extends AgentLayer {
     const MAX_ATTEMPTS = 3;
 
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+      const attemptLabel = attempt === 0
+        ? "Executing SQL against the selected database..."
+        : `Repairing and retrying SQL execution (attempt ${attempt + 1}/${MAX_ATTEMPTS})...`;
+
+      ctx.emit({ type: "agent_step", data: { text: attemptLabel, at: new Date().toISOString() } });
+
       const plausibility = assessVisualizationSqlDraft({
         sql,
         visualizationRequest: state.wantsVisualization ? state.visualizationRequest : null,
@@ -70,6 +77,8 @@ export class SqlExecutionLayer extends AgentLayer {
           }),
           history: request.history,
           temperature: 0.1,
+          onLlmCall: ctx.onLlmCall,
+          onLlmResponse: ctx.onLlmResponse,
         });
         sql = repaired.value.sql.trim();
         continue;
@@ -163,6 +172,8 @@ export class SqlExecutionLayer extends AgentLayer {
             }),
             history: request.history,
             temperature: 0.1,
+            onLlmCall: ctx.onLlmCall,
+            onLlmResponse: ctx.onLlmResponse,
           });
           sql = repaired.value.sql.trim();
           continue;
@@ -211,6 +222,8 @@ export class SqlExecutionLayer extends AgentLayer {
           userPrompt: `Original question: ${request.message}`,
           history: request.history,
           temperature: 0.1,
+          onLlmCall: ctx.onLlmCall,
+          onLlmResponse: ctx.onLlmResponse,
         });
         sql = repaired.value.sql.trim();
       }

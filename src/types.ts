@@ -195,7 +195,7 @@ export type VisualizationChartSpec = VisualizationChartSpecBase & Record<string,
 
 export type AgentStreamEvent =
   | { type: "message_started"; data: { messageId: string } }
-  | { type: "agent_step"; data: { text: string } }
+  | { type: "agent_step"; data: { text: string; at?: string } }
   | { type: "sql_generated"; data: { sql: string } }
   | {
       type: "sql_result";

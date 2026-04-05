@@ -20,42 +20,58 @@ import {
 export async function invokeText(
   input: InvokeTextInput,
 ): Promise<InvokeResult> {
+  const model = input.llm.model;
+  const temperature = input.temperature ?? 0.2;
+
+  input.onLlmCall?.({
+    systemPrompt: input.systemPrompt,
+    userPrompt: input.userPrompt,
+    model,
+    temperature,
+  });
+
+  let result: InvokeResult;
+
   if (input.llm.provider === "github-copilot") {
-    return invokeCopilot({
+    result = await invokeCopilot({
       ...input,
       llm: input.llm,
     });
-  }
-const mcpTools = await client.getTools();
-  const model = createLangChainModel(input.llm, input.temperature ?? 0.2);
-  const timeoutMs = LLM_TIMEOUT_MS;
-  const response = await Promise.race([
-    model.invoke([
-      new SystemMessage(input.systemPrompt),
-      ...toLangChainMessages(input.history ?? []),
-      new HumanMessage(input.userPrompt),
-    ], {
-      tools: mcpTools,
-    }),
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () =>
-          reject(
-            new LLMTimeoutException(
-              `LLM call timed out after ${timeoutMs}ms`,
-              input.llm.provider,
+  } else {
+    const mcpTools = await client.getTools();
+    const langchainModel = createLangChainModel(input.llm, temperature);
+    const timeoutMs = LLM_TIMEOUT_MS;
+    const response = await Promise.race([
+      langchainModel.invoke([
+        new SystemMessage(input.systemPrompt),
+        ...toLangChainMessages(input.history ?? []),
+        new HumanMessage(input.userPrompt),
+      ], {
+        tools: mcpTools,
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new LLMTimeoutException(
+                `LLM call timed out after ${timeoutMs}ms`,
+                input.llm.provider,
+              ),
             ),
-          ),
-        timeoutMs,
+          timeoutMs,
+        ),
       ),
-    ),
-  ]);
+    ]);
 
-  const content = flattenContent(response.content);
-  return {
-    content,
-    tokenUsage: extractTokenUsage(response),
-  };
+    const content = flattenContent(response.content);
+    result = {
+      content,
+      tokenUsage: extractTokenUsage(response),
+    };
+  }
+
+  input.onLlmResponse?.(result);
+  return result;
 }
 
 export async function invokeJson<T>(
@@ -79,6 +95,8 @@ export async function invokeJson<T>(
       userPrompt,
       history: input.history,
       temperature: input.temperature,
+      onLlmCall: input.onLlmCall,
+      onLlmResponse: input.onLlmResponse,
     });
     tokenUsage = mergeTokenUsage(tokenUsage, result.tokenUsage);
 

@@ -1,7 +1,16 @@
+import type { LlmCallHook, LlmResponseHook } from "../llm/types.js";
 import type { GraphStateValue } from "../llm/state.js";
-import type { AgentRunRequest } from "../types.js";
+import type { AgentRunRequest, AgentStreamEvent } from "../types.js";
 
 export type LayerMap = Map<string, AgentLayer>;
+
+export type EmitFn = (event: AgentStreamEvent) => void;
+
+export type LayerContext = {
+  emit: EmitFn;
+  onLlmCall?: LlmCallHook;
+  onLlmResponse?: LlmResponseHook;
+};
 
 export type EdgeDef =
   | { kind: "unconditional"; target: AgentLayer }
@@ -31,6 +40,7 @@ export abstract class AgentLayer {
   abstract execute(
     request: AgentRunRequest,
     state: GraphStateValue,
+    ctx: LayerContext,
   ): Promise<Partial<GraphStateValue>>;
 
   shouldSkip?(state: GraphStateValue): boolean;

@@ -3,7 +3,7 @@ import 'dotenv/config';
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { verifyIncomingSignature } from "./auth.js";
 import { syncDatabase } from './database/knowledge.js';
-import { runAgent } from './llm/runner.js';
+import { streamAgent } from './llm/runner.js';
 import type { AgentRunRequest, AgentSyncRequest } from "./types.js";
 
 
@@ -40,17 +40,17 @@ const server = createServer(async (request, response) => {
 
     if (request.url === "/api/chat/run") {
       const payload = JSON.parse(rawBody) as AgentRunRequest;
- 
-      const events = await runAgent(payload);
 
       response.writeHead(200, {
         "content-type": "application/x-ndjson; charset=utf-8",
         "cache-control": "no-cache, no-transform",
         connection: "keep-alive",
       });
-      for (const event of events) {
+
+      for await (const event of streamAgent(payload)) {
         response.write(`${JSON.stringify(event)}\n`);
       }
+
       response.end();
       return;
     }

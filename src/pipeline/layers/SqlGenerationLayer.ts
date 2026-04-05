@@ -5,6 +5,7 @@ import { VisualizationSqlUserPromptBuilder } from "../../prompts/VisualizationSq
 import type { AgentRunRequest, TokenUsage } from "../../types.js";
 import { mergeTokenUsage } from "../../utils/token.js";
 import { AgentLayer } from "../AgentLayer.js";
+import type { LayerContext } from "../AgentLayer.js";
 import { createSqlPromptBuilder } from "./shared.js";
 
 export class SqlGenerationLayer extends AgentLayer {
@@ -14,7 +15,7 @@ export class SqlGenerationLayer extends AgentLayer {
     return state.cacheHit || state.intentKind === "small_talk" || !!state.answer || !!state.errorMessage;
   }
 
-  async execute(request: AgentRunRequest, state: GraphStateValue): Promise<Partial<GraphStateValue>> {
+  async execute(request: AgentRunRequest, state: GraphStateValue, ctx: LayerContext): Promise<Partial<GraphStateValue>> {
     const sqlPromptBuilder = createSqlPromptBuilder(request.database.provider);
     const userPromptBuilder = new VisualizationSqlUserPromptBuilder();
     let tokenUsage: TokenUsage | null = null;
@@ -24,6 +25,12 @@ export class SqlGenerationLayer extends AgentLayer {
     const MAX_DRAFT_ATTEMPTS = 3;
 
     for (let attempt = 0; attempt < MAX_DRAFT_ATTEMPTS; attempt += 1) {
+      const attemptLabel = attempt === 0
+        ? "Generating read-only SQL..."
+        : `Retrying SQL generation (attempt ${attempt + 1}/${MAX_DRAFT_ATTEMPTS})...`;
+
+      ctx.emit({ type: "agent_step", data: { text: attemptLabel, at: new Date().toISOString() } });
+
       try {
         const result = await invokeJson<{ sql: string; rationale?: string }>({
           llm: request.llm,
@@ -44,6 +51,8 @@ export class SqlGenerationLayer extends AgentLayer {
           }),
           history: request.history,
           temperature: 0.1,
+          onLlmCall: ctx.onLlmCall,
+          onLlmResponse: ctx.onLlmResponse,
         });
 
         tokenUsage = mergeTokenUsage(tokenUsage, result.tokenUsage);

@@ -7,6 +7,7 @@ import { ChartPlanPromptBuilder } from "../../prompts/ChartPlanPromptBuilder.js"
 import type { AgentRunRequest } from "../../types.js";
 import { toReadableLabel } from "../../utils/text.js";
 import { AgentLayer } from "../AgentLayer.js";
+import type { LayerContext } from "../AgentLayer.js";
 
 export class ChartLayer extends AgentLayer {
   readonly name = "planChart";
@@ -20,7 +21,7 @@ export class ChartLayer extends AgentLayer {
     );
   }
 
-  async execute(request: AgentRunRequest, state: GraphStateValue): Promise<Partial<GraphStateValue>> {
+  async execute(request: AgentRunRequest, state: GraphStateValue, ctx: LayerContext): Promise<Partial<GraphStateValue>> {
     const autoChartAllowed =
       state.intentKind === "explicit_visualization" ||
       state.intentKind === "visualization_followup" ||
@@ -33,13 +34,16 @@ export class ChartLayer extends AgentLayer {
     const numericColumns = state.columns.filter((column) =>
       state.rows.some((row) => typeof row[column] === "number"),
     );
-    const labelColumns = state.columns.filter((column) =>
-      state.rows.some((row) => typeof row[column] === "string"),
-    );
 
     if (numericColumns.length === 0) {
       return {};
     }
+
+    ctx.emit({ type: "agent_step", data: { text: "Planning a D3 visualization...", at: new Date().toISOString() } });
+
+    const labelColumns = state.columns.filter((column) =>
+      state.rows.some((row) => typeof row[column] === "string"),
+    );
 
     const deterministicChartSpec = planChartSpecDeterministically({
       question: request.message,
@@ -77,6 +81,8 @@ export class ChartLayer extends AgentLayer {
         llm: request.llm,
         ...prompt,
         temperature: 0.1,
+        onLlmCall: ctx.onLlmCall,
+        onLlmResponse: ctx.onLlmResponse,
       });
 
       const xValid = state.columns.includes(value.xField);
