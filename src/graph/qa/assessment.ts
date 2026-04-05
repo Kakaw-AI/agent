@@ -1,7 +1,7 @@
-// agent-ts/src/graph/sql/assessment.ts
+// This module contains logic for assessing the SQL drafts generated for visualization requests, specifically checking if they include the required fields and if the selected fields are readable. It also includes a function to build an outcome when the agent fails to generate a valid SQL draft after multiple attempts.
 
-import { getRequiredVisualizationFields } from "../visualization.js";
 import type { SqlDraftAssessment, VisualizationSqlDraftInput } from "../types.js";
+import { getRequiredVisualizationFields } from "../visualization.js";
 import {
   extractFinalSelectClause,
   inferSqlSelectAlias,

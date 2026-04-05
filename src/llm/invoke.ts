@@ -1,12 +1,15 @@
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { LLM_TIMEOUT_MS } from "../config.js";
 import { LLMJsonResponseException } from "../exceptions/LLMJsonResponseException.js";
 import { LLMTimeoutException } from "../exceptions/LLMTimeoutException.js";
 import { DefaultJsonPromptBuilder } from "../prompts/BaseJsonFixPromptBuilder.js";
 import type { TokenUsage } from "../types.js";
+import { flattenContent } from "../utils/text.js";
 import { mergeTokenUsage } from "../utils/token.js";
-import { invokeCopilot } from "./copilot.js";
 import { createLangChainModel, extractTokenUsage } from "./langchain.js";
-import { flattenContent, toLangChainMessages } from "./messages.js";
+import client from "./mcp.js";
+import { toLangChainMessages } from "./messages.js";
+import { invokeCopilot } from "./providers/copilot.js";
 import {
   InvokeJsonResponse,
   InvokeResult,
@@ -23,15 +26,17 @@ export async function invokeText(
       llm: input.llm,
     });
   }
-
+const mcpTools = await client.getTools();
   const model = createLangChainModel(input.llm, input.temperature ?? 0.2);
-  const timeoutMs = 30_000;
+  const timeoutMs = LLM_TIMEOUT_MS;
   const response = await Promise.race([
     model.invoke([
       new SystemMessage(input.systemPrompt),
       ...toLangChainMessages(input.history ?? []),
       new HumanMessage(input.userPrompt),
-    ],),
+    ], {
+      tools: mcpTools,
+    }),
     new Promise<never>((_, reject) =>
       setTimeout(
         () =>

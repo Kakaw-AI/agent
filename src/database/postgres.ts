@@ -1,7 +1,7 @@
 import { Client } from "pg";
+import { MAX_SAMPLE_ROWS } from "../config.js";
 import type { AgentDatabaseRuntime, DatabaseCatalogTable } from "../types.js";
-import { MAX_SAMPLE_ROWS } from "./query.js";
-import { collectSampleValues, normalizeName, sanitizeRow } from "./sanitize.js";
+import { collectSampleValues, extractPostgresIndexColumns, normalizeName, sanitizeRow } from "./sanitize.js";
 
 export async function introspectPostgres(
   database: AgentDatabaseRuntime,
@@ -143,14 +143,3 @@ export async function introspectPostgres(
   }
 }
 
-function extractPostgresIndexColumns(indexDefinition: string) {
-  const match = indexDefinition.match(/\((.+)\)/);
-  if (!match) {
-    return [];
-  }
-
-  return match[1]
-    .split(",")
-    .map((part) => part.trim().replace(/^"|"$/g, ""))
-    .filter(Boolean);
-}

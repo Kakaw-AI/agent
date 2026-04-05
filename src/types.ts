@@ -119,6 +119,80 @@ export type TokenUsage = {
   totalTokens: number;
 };
 
+export type VisualizationRequest = {
+  categoryFields: string[];
+  metricField: string | null;
+  seriesField: string | null;
+  groupField: string | null;
+  networkViewRequested: boolean;
+};
+
+export type VisualizationRequestInput = {
+  categoryFields?: Array<unknown> | string | null;
+  metricField?: string | null;
+  seriesField?: string | null;
+  groupField?: string | null;
+  networkViewRequested?: boolean;
+};
+
+export type VisualizationCapabilityKind =
+  | "simple_xy_chart"
+  | "grouped_bar"
+  | "stacked_bar"
+  | "network_graph"
+  | "unsupported_needs_narrowing";
+
+export type VisualizationCapabilityDecision = {
+  kind: VisualizationCapabilityKind;
+  supported: boolean;
+  reason: string | null;
+  requestedCategoryFields: string[];
+  metricField: string | null;
+  seriesField: string | null;
+  groupField: string | null;
+  networkViewRequested: boolean;
+};
+
+export type VisualizationValidationStatus = "pending" | "valid" | "invalid" | "narrowed";
+
+export type VisualizationValidationResult = {
+  status: VisualizationValidationStatus;
+  errors: string[];
+  narrowedFrom: string[];
+  droppedFields: string[];
+};
+
+export type VisualizationOutcome = {
+  request: VisualizationRequest;
+  capabilityDecision: VisualizationCapabilityDecision | null;
+  validation: VisualizationValidationResult | null;
+  narrowingReason: string | null;
+};
+
+export type TraceAnalyticsOutcome =
+  | "failed"
+  | "no_rows"
+  | "narrowed"
+  | "chart_rendered"
+  | "completed_text";
+
+export type VisualizationChartSpecBase = {
+  kind: "bar" | "line" | "pie" | "scatter" | "histogram" | "network";
+  title?: string;
+  xField: string;
+  yField: string;
+  xLabel: string;
+  yLabel: string;
+  data: Array<Record<string, unknown>>;
+  seriesField?: string | null;
+  stacked?: boolean;
+  legendLabel?: string | null;
+  validation?: VisualizationValidationResult | null;
+  visualization?: VisualizationOutcome | null;
+};
+
+export type VisualizationChartSpec = VisualizationChartSpecBase & Record<string, unknown>;
+
 export type AgentStreamEvent =
   | { type: "message_started"; data: { messageId: string } }
   | { type: "agent_step"; data: { text: string } }
@@ -136,12 +210,19 @@ export type AgentStreamEvent =
       data: {
         chartType: string;
         title?: string;
-        spec: Record<string, unknown>;
+        spec: VisualizationChartSpec;
+        visualizationOutcome?: VisualizationOutcome | null;
       };
     }
   | {
       type: "message_completed";
-      data: { messageId: string; content: string; tokenUsage?: TokenUsage };
+      data: {
+        messageId: string;
+        content: string;
+        tokenUsage?: TokenUsage;
+        visualizationOutcome?: VisualizationOutcome | null;
+        analyticsOutcome?: TraceAnalyticsOutcome;
+      };
     }
   | {
       type: "suggestions_generated";
@@ -152,12 +233,15 @@ export type AgentStreamEvent =
       data: {
         steps: Array<{ text: string; at: string }>;
         toolCalls: Array<Record<string, unknown>>;
-        repairHistory: Array<Record<string, unknown>>;
-        cacheKey?: string;
-        cacheHit?: boolean;
-        chartSpec?: Record<string, unknown>;
-      };
-    }
+      repairHistory: Array<Record<string, unknown>>;
+      cacheKey?: string;
+      cacheHit?: boolean;
+      chartSpec?: VisualizationChartSpec | null;
+      visualizationOutcome?: VisualizationOutcome | null;
+      analyticsOutcome?: TraceAnalyticsOutcome;
+      rowCount?: number;
+    };
+  }
   | {
       type: "message_failed";
       data: {

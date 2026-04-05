@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
+import { MAX_SAMPLE_ROWS } from "../config.js";
 import type { AgentDatabaseRuntime, DatabaseCatalogTable } from "../types.js";
-import { MAX_SAMPLE_ROWS, openSqlite } from "./query.js";
+import { openSqlite } from "./query.js";
 import { collectSampleValues, normalizeName, sanitizeRow } from "./sanitize.js";
 
 export function introspectSqlite(database: AgentDatabaseRuntime): DatabaseCatalogTable[] {

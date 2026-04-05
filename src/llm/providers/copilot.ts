@@ -1,13 +1,11 @@
-import type { AgentHistoryMessage, AgentLlmRuntime } from "../types.js";
-import type { InvokeResult } from "./invoke.js";
 
-export async function invokeCopilot(input: {
-  llm: Extract<AgentLlmRuntime, { provider: "github-copilot" }>;
-  systemPrompt: string;
-  userPrompt: string;
-  history?: AgentHistoryMessage[];
-  temperature?: number;
-}): Promise<InvokeResult> {
+import { LLMResponseException } from "../../exceptions/LLMResponseException.js";
+import { LLMTimeoutException } from "../../exceptions/LLMTimeoutException.js";
+import { toRawMessages } from "../messages.js";
+import { CopilotResponse, InvokeResult, LLMInput } from "../types.js";
+
+
+export async function invokeCopilot(input: LLMInput): Promise<InvokeResult> {
   const messages = [
     { role: "system", content: input.systemPrompt },
     ...toRawMessages(input.history ?? []),
@@ -34,18 +32,17 @@ export async function invokeCopilot(input: {
       }),
     }),
     new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`LLM call timed out after ${timeoutMs}ms`)), timeoutMs),
+      setTimeout(() => reject(new LLMTimeoutException(`LLM call timed out after ${timeoutMs}ms`, input.llm.provider)), timeoutMs),
     ),
   ]);
 
   if (!response.ok) {
-    throw new Error(await response.text());
+    throw new LLMResponseException(await response.text(), response.status, "github-copilot");
   }
 
-  const payload = (await response.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-    usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
-  };
+  
+
+  const payload = (await response.json()) as CopilotResponse;
 
   return {
     content: payload.choices?.[0]?.message?.content?.trim() ?? "",
@@ -57,11 +54,4 @@ export async function invokeCopilot(input: {
         }
       : null,
   };
-}
-
-function toRawMessages(history: AgentHistoryMessage[]) {
-  return history.map((message) => ({
-    role: message.role,
-    content: message.content,
-  }));
 }

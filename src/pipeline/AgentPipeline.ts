@@ -1,7 +1,7 @@
 import { StateGraph } from "@langchain/langgraph";
-import type { GraphStateValue } from "../graph/state.js";
-import { GraphState } from "../graph/state.js";
-import type { AgentRunRequest, AgentStreamEvent, VisualizationOutcome, TraceAnalyticsOutcome } from "../types.js";
+import type { GraphStateValue } from "../llm/state.js";
+import { GraphState } from "../llm/state.js";
+import type { AgentRunRequest, AgentStreamEvent, TraceAnalyticsOutcome, VisualizationOutcome } from "../types.js";
 import type { AgentLayer, EdgeDef, LayerMap } from "./AgentLayer.js";
 import { EdgeBuilder } from "./AgentLayer.js";
 
@@ -190,7 +190,6 @@ export function buildEventsFromFinalState(
   }
 
   if (finalState.errorMessage) {
-    const publicMessage = finalState.publicErrorMessage ?? finalState.errorMessage;
     return [
       ...events,
       traceEvent,
@@ -198,9 +197,9 @@ export function buildEventsFromFinalState(
         type: "message_failed",
         data: {
           messageId: request.messageId,
-          error: publicMessage,
+          error: finalState.errorMessage,
           errorInfo: {
-            message: publicMessage,
+            message: finalState.errorMessage,
             code: "AGENT_SQL_GENERATION_FAILED",
             statusCode: 502,
             retryable: false,

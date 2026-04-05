@@ -1,7 +1,10 @@
-// agent-ts/src/graph/sql/parser.ts
-
+// It's main role convert SQL to a structured format that can be used to assess the SQL and plan visualizations based on it. It also includes some utilities for parsing SQL.
 export function normalizeSqlIdentifier(value: string): string {
-  return value.trim().replace(/^["'`]+|["'`]+$/g, "").toLowerCase().replace(/\s+/g, "_");
+  return value
+    .trim()
+    .replace(/^["'`]+|["'`]+$/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, "_");
 }
 
 export function splitSqlSelectList(selectClause: string): string[] {
@@ -34,32 +37,55 @@ export function splitSqlSelectList(selectClause: string): string[] {
   return items;
 }
 
-export function isIdentifierBoundary(char: string | undefined): boolean {
+function isIdentifierBoundary(char: string | undefined): boolean {
   return !char || !/[a-z0-9_]/i.test(char);
 }
 
-export function findKeywordAtTopLevel(sql: string, keyword: string, startIndex = 0): number {
+function findKeywordAtTopLevel(
+  sql: string,
+  keyword: string,
+  startIndex = 0,
+): number {
   const normalizedKeyword = keyword.toLowerCase();
   let depth = 0;
   let inSingleQuote = false;
   let inDoubleQuote = false;
   let inBacktickQuote = false;
 
-  for (let index = startIndex; index <= sql.length - normalizedKeyword.length; index += 1) {
+  for (
+    let index = startIndex;
+    index <= sql.length - normalizedKeyword.length;
+    index += 1
+  ) {
     const char = sql[index];
     const lowerChar = char.toLowerCase();
 
-    if (!inDoubleQuote && !inBacktickQuote && char === "'" && sql[index - 1] !== "\\") {
+    if (
+      !inDoubleQuote &&
+      !inBacktickQuote &&
+      char === "'" &&
+      sql[index - 1] !== "\\"
+    ) {
       inSingleQuote = !inSingleQuote;
       continue;
     }
 
-    if (!inSingleQuote && !inBacktickQuote && char === '"' && sql[index - 1] !== "\\") {
+    if (
+      !inSingleQuote &&
+      !inBacktickQuote &&
+      char === '"' &&
+      sql[index - 1] !== "\\"
+    ) {
       inDoubleQuote = !inDoubleQuote;
       continue;
     }
 
-    if (!inSingleQuote && !inDoubleQuote && char === "`" && sql[index - 1] !== "\\") {
+    if (
+      !inSingleQuote &&
+      !inDoubleQuote &&
+      char === "`" &&
+      sql[index - 1] !== "\\"
+    ) {
       inBacktickQuote = !inBacktickQuote;
       continue;
     }
@@ -84,7 +110,8 @@ export function findKeywordAtTopLevel(sql: string, keyword: string, startIndex =
 
     if (
       lowerChar === normalizedKeyword[0] &&
-      sql.slice(index, index + normalizedKeyword.length).toLowerCase() === normalizedKeyword &&
+      sql.slice(index, index + normalizedKeyword.length).toLowerCase() ===
+        normalizedKeyword &&
       isIdentifierBoundary(sql[index - 1]) &&
       isIdentifierBoundary(sql[index + normalizedKeyword.length])
     ) {
@@ -113,7 +140,11 @@ export function extractFinalSelectClause(sql: string): string | null {
     return null;
   }
 
-  const fromIndex = findKeywordAtTopLevel(sql, "from", lastTopLevelSelect + "select".length);
+  const fromIndex = findKeywordAtTopLevel(
+    sql,
+    "from",
+    lastTopLevelSelect + "select".length,
+  );
   if (fromIndex === -1) {
     return null;
   }

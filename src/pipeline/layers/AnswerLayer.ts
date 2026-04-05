@@ -1,7 +1,7 @@
 import { buildNoRowsAnswer } from "../../llm/answers.js";
 import { invokeText } from "../../llm/invoke.js";
+import type { GraphStateValue } from "../../llm/state.js";
 import { AnswerPromptBuilder } from "../../prompts/AnswerPromptBuilder.js";
-import type { GraphStateValue } from "../../graph/state.js";
 import type { AgentRunRequest } from "../../types.js";
 import { AgentLayer } from "../AgentLayer.js";
 

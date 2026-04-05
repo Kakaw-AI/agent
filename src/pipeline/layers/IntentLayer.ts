@@ -1,7 +1,7 @@
+import { decideVisualizationCapability } from "../../graph/visualization.js";
 import { buildDirectAnswer } from "../../llm/answers.js";
 import { classifyIntentHeuristically } from "../../llm/intent/classifier.js";
-import { decideVisualizationCapability } from "../../graph/visualization.js";
-import type { GraphStateValue } from "../../graph/state.js";
+import type { GraphStateValue } from "../../llm/state.js";
 import type { AgentRunRequest } from "../../types.js";
 import { AgentLayer } from "../AgentLayer.js";
 

@@ -1,13 +1,15 @@
-import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { ChatAnthropic } from "@langchain/anthropic";
+import {
+  AIMessage
+} from "@langchain/core/messages";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatOpenAI } from "@langchain/openai";
-import type { AgentHistoryMessage, AgentLlmRuntime, TokenUsage } from "../types.js";
+import type {
+  TokenUsage
+} from "../types.js";
+import { LLMRuntime } from "./types.js";
 
-export function createLangChainModel(
-  llm: Extract<AgentLlmRuntime, { provider: "openai" | "custom-openai" | "openrouter" | "anthropic" | "google" }>,
-  temperature: number,
-) {
+export function createLangChainModel(llm: LLMRuntime, temperature: number) {
   switch (llm.provider) {
     case "openai":
     case "custom-openai":
@@ -39,35 +41,6 @@ export function createLangChainModel(
   }
 }
 
-export function toLangChainMessages(history: AgentHistoryMessage[]) {
-  return history.map((message) => {
-    switch (message.role) {
-      case "assistant":
-        return new AIMessage(message.content);
-      case "system":
-        return new SystemMessage(message.content);
-      default:
-        return new HumanMessage(message.content);
-    }
-  });
-}
-
-export function flattenContent(content: unknown) {
-  if (typeof content === "string") {
-    return content.trim();
-  }
-
-  if (Array.isArray(content)) {
-    return content
-      .map((part) =>
-        part && typeof part === "object" && "text" in part ? String(part.text ?? "") : "",
-      )
-      .join("")
-      .trim();
-  }
-
-  return "";
-}
 
 export function extractTokenUsage(response: AIMessage): TokenUsage | null {
   const usage = response.usage_metadata;

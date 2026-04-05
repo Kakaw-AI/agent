@@ -1,6 +1,6 @@
 import { invokeJson } from "../../llm/invoke.js";
+import type { GraphStateValue } from "../../llm/state.js";
 import { SuggestionsPromptBuilder } from "../../prompts/SuggestionsPromptBuilder.js";
-import type { GraphStateValue } from "../../graph/state.js";
 import type { AgentRunRequest } from "../../types.js";
 import { AgentLayer } from "../AgentLayer.js";
 

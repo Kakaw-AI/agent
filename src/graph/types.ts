@@ -1,25 +1,15 @@
 import type { DatabaseKnowledgeRuntime, VisualizationCapabilityDecision, VisualizationRequest } from "../types.js";
 
-export type DerivedDimensionRecipeKey = "body_group";
 
-export type DerivedDimensionRecipe = {
-  key: DerivedDimensionRecipeKey;
-  label: string;
-  description: string;
-  sourceFields: readonly string[];
-  outputField: string;
-  labels: readonly string[];
-  sqlContract: string;
-};
 
 export type {
-    VisualizationCapabilityDecision,
-    VisualizationChartSpec,
-    VisualizationOutcome,
-    VisualizationRequest,
-    VisualizationRequestInput,
-    VisualizationValidationResult,
-    VisualizationValidationStatus
+  VisualizationCapabilityDecision,
+  VisualizationChartSpec,
+  VisualizationOutcome,
+  VisualizationRequest,
+  VisualizationRequestInput,
+  VisualizationValidationResult,
+  VisualizationValidationStatus
 } from "../types.js";
 
 export type IntentKind =

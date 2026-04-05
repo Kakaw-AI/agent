@@ -1,17 +1,11 @@
 import Database from "better-sqlite3";
 import { Pool } from "pg";
+import { MAX_RESULT_ROWS } from "../config.js";
+import { SQLException } from "../exceptions/SQLException.js";
 import type { AgentDatabaseRuntime } from "../types.js";
 import { assertReadOnlySql } from "./safety.js";
 import { sanitizeRow } from "./sanitize.js";
-
-export type QueryResult = {
-  rowCount: number;
-  columns: string[];
-  rows: Array<Record<string, unknown>>;
-};
-
-export const MAX_SAMPLE_ROWS = 3;
-export const MAX_RESULT_ROWS = 200;
+import { QueryResult } from "./types.js";
 
 const pgPools = new Map<string, Pool>();
 
@@ -24,7 +18,7 @@ export function getPool(connectionString: string): Pool {
 
 export function openSqlite(database: AgentDatabaseRuntime) {
   if (!database.sqliteFilePath) {
-    throw new Error("SQLite runtime is missing sqliteFilePath.");
+    throw new SQLException("SQLite runtime is missing sqliteFilePath.");
   }
 
   return new Database(database.sqliteFilePath, {

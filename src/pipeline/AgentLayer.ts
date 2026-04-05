@@ -1,4 +1,4 @@
-import type { GraphStateValue } from "../graph/state.js";
+import type { GraphStateValue } from "../llm/state.js";
 import type { AgentRunRequest } from "../types.js";
 
 export type LayerMap = Map<string, AgentLayer>;

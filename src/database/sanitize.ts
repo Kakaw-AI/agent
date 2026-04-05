@@ -50,3 +50,28 @@ export function sanitizeValue(key: string, value: unknown): unknown {
   }
   return value;
 }
+export function normalizeColumnName(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, "_");
+}
+
+export function findColumnByName(columns: string[], candidate: string | null | undefined) {
+  if (!candidate) {
+    return null;
+  }
+
+  const normalizedCandidate = normalizeColumnName(candidate);
+  return (
+    columns.find((column) => normalizeColumnName(column) === normalizedCandidate) ?? null
+  );
+}
+export function extractPostgresIndexColumns(indexDefinition: string) {
+  const match = indexDefinition.match(/\((.+)\)/);
+  if (!match) {
+    return [];
+  }
+
+  return match[1]
+    .split(",")
+    .map((part) => part.trim().replace(/^"|"$/g, ""))
+    .filter(Boolean);
+}

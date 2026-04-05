@@ -1,12 +1,11 @@
-import { invokeJson } from "../../llm/invoke.js";
 import { assessVisualizationSqlDraft, buildVisualizationSqlExhaustedOutcome } from "../../graph/qa/assessment.js";
-import { buildFailurePresentation } from "../../errors.js";
+import { invokeJson } from "../../llm/invoke.js";
+import type { GraphStateValue } from "../../llm/state.js";
 import { VisualizationSqlUserPromptBuilder } from "../../prompts/VisualizationSqlUserPromptBuilder.js";
-import { createSqlPromptBuilder } from "./shared.js";
-import { mergeTokenUsage } from "../../utils/token.js";
-import type { GraphStateValue } from "../../graph/state.js";
 import type { AgentRunRequest, TokenUsage } from "../../types.js";
+import { mergeTokenUsage } from "../../utils/token.js";
 import { AgentLayer } from "../AgentLayer.js";
+import { createSqlPromptBuilder } from "./shared.js";
 
 export class SqlGenerationLayer extends AgentLayer {
   readonly name = "generateSql";
@@ -72,11 +71,9 @@ export class SqlGenerationLayer extends AgentLayer {
         priorErrors = assessment.errors;
       } catch (err) {
         const message = err instanceof Error ? err.message : "SQL generation failed.";
-        const failure = buildFailurePresentation(message);
         return {
           errorMessage: message,
-          publicErrorMessage: failure.publicMessage,
-          steps: [{ text: failure.stepText, at: new Date().toISOString() }],
+          steps: [{ text: `Failed: ${message}`, at: new Date().toISOString() }],
         };
       }
     }

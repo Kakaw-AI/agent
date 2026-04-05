@@ -1,15 +1,11 @@
 import { Annotation } from "@langchain/langgraph";
+import { IntentKind } from "../graph/types.js";
 import type { TokenUsage, VisualizationCapabilityDecision, VisualizationChartSpec, VisualizationRequest, VisualizationValidationStatus } from "../types.js";
 import { mergeTokenUsage } from "../utils/token.js";
-import { IntentKind } from "./types.js";
 
 export const GraphState = Annotation.Root({
   sql: Annotation<string>(),
   errorMessage: Annotation<string | null>({
-    reducer: (_left, right) => right,
-    default: () => null,
-  }),
-  publicErrorMessage: Annotation<string | null>({
     reducer: (_left, right) => right,
     default: () => null,
   }),
