@@ -1,3 +1,4 @@
+import type { ChartPlan } from "../llm/schemas.js";
 import type { DatabaseKnowledgeRuntime, VisualizationCapabilityDecision, VisualizationRequest } from "../types.js";
 
 
@@ -92,9 +93,4 @@ export type VisualizationSqlUserPromptInput = {
   priorErrors?: string[];
 };
 
-export type ChartPlanLlmResponse = {
-  kind: "bar" | "line" | "pie" | "scatter" | "histogram";
-  title: string;
-  xField: string;
-  yField: string;
-};
+export type ChartPlanLlmResponse = ChartPlan;

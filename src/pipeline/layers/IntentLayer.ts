@@ -1,6 +1,7 @@
 import { decideVisualizationCapability } from "../../graph/visualization.js";
 import { buildDirectAnswer } from "../../llm/answers.js";
 import { classifyIntentHeuristically } from "../../llm/intent/classifier.js";
+import { extractRowsFromHistory } from "../../llm/intent/history.js";
 import type { GraphStateValue } from "../../llm/state.js";
 import type { AgentRunRequest } from "../../types.js";
 import { AgentLayer } from "../AgentLayer.js";
@@ -30,6 +31,19 @@ export class IntentLayer extends AgentLayer {
     }
 
     ctx.emit({ type: "agent_step", data: { text: "Classifying intent and visualization requirements...", at: new Date().toISOString() } });
+
+    if (intent.kind === "visualization_followup") {
+      const prior = extractRowsFromHistory(request.history);
+      return {
+        intentKind: intent.kind,
+        wantsVisualization: intent.wantsVisualization,
+        visualizationRequest: intent.visualizationRequest,
+        visualizationCapabilityDecision: decideVisualizationCapability(intent.visualizationRequest),
+        rows: prior?.rows ?? [],
+        columns: prior?.columns ?? [],
+        steps: [{ text: "Classifying intent and visualization requirements...", at: new Date().toISOString() }],
+      };
+    }
 
     return {
       intentKind: intent.kind,

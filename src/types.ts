@@ -63,23 +63,18 @@ export type AgentDatabaseRuntime = {
 export type AgentHistoryMessage = {
   role: "user" | "assistant" | "system";
   content: string;
+  rows?: Array<Record<string, unknown>>;
+  columns?: string[];
 };
 
-export type AgentLlmRuntime =
-  | {
-      connectionId: string;
-      provider: "openai" | "custom-openai" | "openrouter" | "anthropic" | "google";
-      model: string;
-      apiKey: string;
-      baseUrl?: string;
-      headers?: Record<string, string>;
-    }
-  | {
-      connectionId: string;
-      provider: "github-copilot";
-      model: string;
-      accessToken: string;
-    };
+export type AgentLlmRuntime = {
+  connectionId: string;
+  provider: "openai" | "openrouter" | "anthropic" | "google" | "ollama" | "lm-studio";
+  model: string;
+  apiKey: string;
+  baseUrl?: string;
+  headers?: Record<string, string>;
+};
 
 export type AgentRunRequest = {
   requestId: string;

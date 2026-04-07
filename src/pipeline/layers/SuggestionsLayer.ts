@@ -1,4 +1,5 @@
 import { invokeJson } from "../../llm/invoke.js";
+import { SuggestionsSchema } from "../../llm/schemas.js";
 import type { GraphStateValue } from "../../llm/state.js";
 import { SuggestionsPromptBuilder } from "../../prompts/SuggestionsPromptBuilder.js";
 import type { AgentRunRequest } from "../../types.js";
@@ -23,13 +24,14 @@ export class SuggestionsLayer extends AgentLayer {
     });
 
     try {
-      const { value } = await invokeJson<string[]>({
+      const { value } = await invokeJson({
         llm: request.llm,
         ...prompt,
         history: request.history,
         temperature: 0.5,
         onLlmCall: ctx.onLlmCall,
         onLlmResponse: ctx.onLlmResponse,
+        schema: SuggestionsSchema,
       });
 
       return {

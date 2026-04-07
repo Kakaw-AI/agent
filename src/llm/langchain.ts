@@ -9,14 +9,18 @@ import type {
 } from "../types.js";
 import { LLMRuntime } from "./types.js";
 
-export function createLangChainModel(llm: LLMRuntime, temperature: number) {
+export function createLangChainModel(
+  llm: LLMRuntime,
+  temperature: number,
+): ChatOpenAI | ChatAnthropic | ChatGoogleGenerativeAI {
   switch (llm.provider) {
     case "openai":
-    case "custom-openai":
     case "openrouter":
+    case "ollama":
+    case "lm-studio":
       return new ChatOpenAI({
         model: llm.model,
-        apiKey: llm.apiKey,
+        apiKey: llm.apiKey || "empty",
         temperature,
         configuration: {
           baseURL:

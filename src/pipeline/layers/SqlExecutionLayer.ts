@@ -6,6 +6,7 @@ import {
   validateVisualizationResult,
 } from "../../graph/visualization.js";
 import { invokeJson } from "../../llm/invoke.js";
+import { SqlResponseSchema } from "../../llm/schemas.js";
 import type { GraphStateValue } from "../../llm/state.js";
 import { VisualizationSqlUserPromptBuilder } from "../../prompts/VisualizationSqlUserPromptBuilder.js";
 import type { AgentRunRequest } from "../../types.js";
@@ -17,7 +18,13 @@ export class SqlExecutionLayer extends AgentLayer {
   readonly name = "executeSql";
 
   shouldSkip(state: GraphStateValue): boolean {
-    return state.cacheHit || state.intentKind === "small_talk" || !!state.errorMessage || !state.sql;
+    return (
+      state.cacheHit ||
+      state.intentKind === "small_talk" ||
+      (state.intentKind === "visualization_followup" && state.rows.length > 0) ||
+      !!state.errorMessage ||
+      !state.sql
+    );
   }
 
   async execute(request: AgentRunRequest, state: GraphStateValue, ctx: LayerContext): Promise<Partial<GraphStateValue>> {
@@ -57,7 +64,7 @@ export class SqlExecutionLayer extends AgentLayer {
           };
         }
 
-        const repaired = await invokeJson<{ sql: string }>({
+        const repaired = await invokeJson({
           llm: request.llm,
           systemPrompt: sqlPromptBuilder.build({
             knowledge: request.knowledge,
@@ -79,6 +86,7 @@ export class SqlExecutionLayer extends AgentLayer {
           temperature: 0.1,
           onLlmCall: ctx.onLlmCall,
           onLlmResponse: ctx.onLlmResponse,
+          schema: SqlResponseSchema,
         });
         sql = repaired.value.sql.trim();
         continue;
@@ -149,7 +157,7 @@ export class SqlExecutionLayer extends AgentLayer {
             };
           }
 
-          const repaired = await invokeJson<{ sql: string }>({
+          const repaired = await invokeJson({
             llm: request.llm,
             systemPrompt: sqlPromptBuilder.build({
               knowledge: request.knowledge,
@@ -174,6 +182,7 @@ export class SqlExecutionLayer extends AgentLayer {
             temperature: 0.1,
             onLlmCall: ctx.onLlmCall,
             onLlmResponse: ctx.onLlmResponse,
+            schema: SqlResponseSchema,
           });
           sql = repaired.value.sql.trim();
           continue;
@@ -208,7 +217,7 @@ export class SqlExecutionLayer extends AgentLayer {
           };
         }
 
-        const repaired = await invokeJson<{ sql: string }>({
+        const repaired = await invokeJson({
           llm: request.llm,
           systemPrompt: sqlPromptBuilder.build({
             knowledge: request.knowledge,
@@ -224,6 +233,7 @@ export class SqlExecutionLayer extends AgentLayer {
           temperature: 0.1,
           onLlmCall: ctx.onLlmCall,
           onLlmResponse: ctx.onLlmResponse,
+          schema: SqlResponseSchema,
         });
         sql = repaired.value.sql.trim();
       }

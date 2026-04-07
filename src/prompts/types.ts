@@ -1,9 +1,3 @@
-export type JsonPromptBuildInput = {
-  userPrompt: string;
-  attempt: number;
-  invalidJsonPreview: string;
-};
-
 export type AnswerPromptInput = {
   question: string;
   columns: string[];

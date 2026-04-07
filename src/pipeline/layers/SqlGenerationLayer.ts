@@ -1,5 +1,6 @@
 import { assessVisualizationSqlDraft, buildVisualizationSqlExhaustedOutcome } from "../../graph/qa/assessment.js";
 import { invokeJson } from "../../llm/invoke.js";
+import { SqlWithRationaleSchema } from "../../llm/schemas.js";
 import type { GraphStateValue } from "../../llm/state.js";
 import { VisualizationSqlUserPromptBuilder } from "../../prompts/VisualizationSqlUserPromptBuilder.js";
 import type { AgentRunRequest, TokenUsage } from "../../types.js";
@@ -12,7 +13,13 @@ export class SqlGenerationLayer extends AgentLayer {
   readonly name = "generateSql";
 
   shouldSkip(state: GraphStateValue): boolean {
-    return state.cacheHit || state.intentKind === "small_talk" || !!state.answer || !!state.errorMessage;
+    return (
+      state.cacheHit ||
+      state.intentKind === "small_talk" ||
+      state.intentKind === "visualization_followup" ||
+      !!state.answer ||
+      !!state.errorMessage
+    );
   }
 
   async execute(request: AgentRunRequest, state: GraphStateValue, ctx: LayerContext): Promise<Partial<GraphStateValue>> {
@@ -32,7 +39,7 @@ export class SqlGenerationLayer extends AgentLayer {
       ctx.emit({ type: "agent_step", data: { text: attemptLabel, at: new Date().toISOString() } });
 
       try {
-        const result = await invokeJson<{ sql: string; rationale?: string }>({
+        const result = await invokeJson({
           llm: request.llm,
           systemPrompt: sqlPromptBuilder.build({
             knowledge: request.knowledge,
@@ -53,6 +60,7 @@ export class SqlGenerationLayer extends AgentLayer {
           temperature: 0.1,
           onLlmCall: ctx.onLlmCall,
           onLlmResponse: ctx.onLlmResponse,
+          schema: SqlWithRationaleSchema,
         });
 
         tokenUsage = mergeTokenUsage(tokenUsage, result.tokenUsage);

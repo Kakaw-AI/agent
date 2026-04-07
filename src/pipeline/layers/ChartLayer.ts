@@ -1,5 +1,5 @@
 import { buildFallbackChartSpec, planChartSpecDeterministically } from "../../graph/chart-spec.js";
-import type { ChartPlanLlmResponse } from "../../graph/types.js";
+import { ChartPlanSchema } from "../../llm/schemas.js";
 import { shouldAutoPlanChart } from "../../llm/intent/chart-planning.js";
 import { invokeJson } from "../../llm/invoke.js";
 import type { GraphStateValue } from "../../llm/state.js";
@@ -77,12 +77,13 @@ export class ChartLayer extends AgentLayer {
     });
 
     try {
-      const { value } = await invokeJson<ChartPlanLlmResponse>({
+      const { value } = await invokeJson({
         llm: request.llm,
         ...prompt,
         temperature: 0.1,
         onLlmCall: ctx.onLlmCall,
         onLlmResponse: ctx.onLlmResponse,
+        schema: ChartPlanSchema,
       });
 
       const xValid = state.columns.includes(value.xField);

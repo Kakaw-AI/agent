@@ -1,4 +1,4 @@
-import { AgentHistoryMessage } from "../../types.js";
+import type { AgentHistoryMessage } from "../../types.js";
 import { normalizeQuestion } from "../../utils/text.js";
 import { ANALYTICAL_HINT_PATTERNS, SHORT_VISUALIZATION_PATTERNS, SMALL_TALK_PATTERNS } from "./patterns.js";
 import { isVisualizationKeyword, tokenizeQuestion } from "./text.js";
@@ -37,6 +37,16 @@ export function extractLastAnalyzableAnalyticalTurn(history: AgentHistoryMessage
     };
   }
 
+  return null;
+}
+
+export function extractRowsFromHistory(history: AgentHistoryMessage[]) {
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const msg = history[i];
+    if (msg.role === "assistant" && msg.rows && msg.rows.length > 0 && msg.columns) {
+      return { rows: msg.rows, columns: msg.columns };
+    }
+  }
   return null;
 }
 
