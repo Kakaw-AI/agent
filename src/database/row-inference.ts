@@ -11,7 +11,7 @@ export const TEMPORAL_PATTERNS = [
   /\bover time\b/i,
 ];
 
-export function getColumnValue(row: Record<string, unknown>, field: string) {
+function getColumnValue(row: Record<string, unknown>, field: string) {
   const normalizedField = normalizeColumnName(field);
   const matchingKey = Object.keys(row).find((key) => normalizeColumnName(key) === normalizedField);
   return matchingKey ? row[matchingKey] : undefined;

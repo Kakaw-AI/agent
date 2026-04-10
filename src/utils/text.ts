@@ -30,10 +30,6 @@ export function dedupeFieldNames(fields: Array<string | null | undefined>) {
   return normalizedFields;
 }
 
-export function dedupeRecipeKeys(keys: readonly string[]) {
-  return keys.filter((key, index) => keys.indexOf(key) === index);
-}
-
 export function flattenContent(content: unknown) {
   if (typeof content === "string") {
     return content.trim();

@@ -38,7 +38,7 @@ export async function syncDatabase(
   };
 }
 
-export function buildKnowledgeDocuments(
+function buildKnowledgeDocuments(
   database: AgentDatabaseRuntime,
   tables: DatabaseCatalogTable[],
 ): DatabaseKnowledgeDocument[] {

@@ -17,7 +17,3 @@ export const ChartPlanSchema = z.object({
   yField: z.string(),
 });
 
-export type SqlResponse = z.infer<typeof SqlResponseSchema>;
-export type SqlWithRationale = z.infer<typeof SqlWithRationaleSchema>;
-export type Suggestions = z.infer<typeof SuggestionsSchema>;
-export type ChartPlan = z.infer<typeof ChartPlanSchema>;

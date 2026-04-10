@@ -1,17 +1,4 @@
-import type { ChartPlan } from "../llm/schemas.js";
 import type { DatabaseKnowledgeRuntime, VisualizationCapabilityDecision, VisualizationRequest } from "../types.js";
-
-
-
-export type {
-  VisualizationCapabilityDecision,
-  VisualizationChartSpec,
-  VisualizationOutcome,
-  VisualizationRequest,
-  VisualizationRequestInput,
-  VisualizationValidationResult,
-  VisualizationValidationStatus
-} from "../types.js";
 
 export type IntentKind =
   | "small_talk"
@@ -30,11 +17,6 @@ export type VisualizationValidationInput = {
   capabilityDecision?: VisualizationCapabilityDecision | null;
   columns: string[];
   rows: Array<Record<string, unknown>>;
-};
-
-export type FailurePresentation = {
-  publicMessage: string;
-  stepText: string;
 };
 
 export type FallbackChartSpec = {
@@ -93,4 +75,3 @@ export type VisualizationSqlUserPromptInput = {
   priorErrors?: string[];
 };
 
-export type ChartPlanLlmResponse = ChartPlan;

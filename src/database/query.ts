@@ -9,7 +9,7 @@ import { QueryResult } from "./types.js";
 
 const pgPools = new Map<string, Pool>();
 
-export function getPool(connectionString: string): Pool {
+function getPool(connectionString: string): Pool {
   if (!pgPools.has(connectionString)) {
     pgPools.set(connectionString, new Pool({ connectionString, max: 5 }));
   }

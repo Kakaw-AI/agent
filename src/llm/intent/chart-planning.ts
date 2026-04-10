@@ -1,25 +1,4 @@
 import { TEMPORAL_PATTERNS } from "../../database/row-inference.js";
-import { IntentDecision } from "../../graph/types.js";
-
-export function needsImplicitCountMetric(
-  intent: IntentDecision,
-  availableColumns: string[],
-) {
-  if (
-    intent.kind !== "explicit_visualization" &&
-    intent.kind !== "visualization_followup"
-  ) {
-    return false;
-  }
-
-  const likelyCategoryColumns = availableColumns.filter((column) =>
-    /\b(country|city|state|region|category|type|name|status|provider)\b/i.test(
-      column,
-    ),
-  );
-
-  return likelyCategoryColumns.length > 0;
-}
 
 export function shouldAutoPlanChart(input: {
   question: string;

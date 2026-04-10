@@ -14,13 +14,6 @@ function withTableData(message: AgentHistoryMessage): string {
   );
 }
 
-export function toRawMessages(history: AgentHistoryMessage[]) {
-  return history.map((message) => ({
-    role: message.role,
-    content: withTableData(message),
-  }));
-}
-
 export function toLangChainMessages(history: AgentHistoryMessage[]) {
   return history.map((message) => {
     switch (message.role) {

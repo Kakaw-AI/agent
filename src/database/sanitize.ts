@@ -1,4 +1,4 @@
-export const SECRET_FIELD_PATTERN = /(password|secret|token|key|credential|auth|session)/i;
+const SECRET_FIELD_PATTERN = /(password|secret|token|key|credential|auth|session)/i;
 
 export function collectSampleValues(rows: Array<Record<string, unknown>>, columnName: string) {
   return rows
@@ -22,7 +22,7 @@ export function sanitizeRow(row: Record<string, unknown>) {
   );
 }
 
-export function sanitizeValue(key: string, value: unknown): unknown {
+function sanitizeValue(key: string, value: unknown): unknown {
   if (SECRET_FIELD_PATTERN.test(key)) {
     return "[redacted]";
   }
