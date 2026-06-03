@@ -2,6 +2,7 @@ export type AnswerPromptInput = {
   question: string;
   columns: string[];
   rows: Array<Record<string, unknown>>;
+  rowCount: number;
 };
 
 export type ChartPlanPromptInput = {
@@ -15,6 +16,8 @@ export type ChartPlanPromptInput = {
 export type SuggestionsPromptInput = {
   question: string;
   answer: string;
+  columns: string[];
+  rowCount: number;
   tableNames: string;
   summary: string;
 };

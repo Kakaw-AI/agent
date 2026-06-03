@@ -32,6 +32,7 @@ export class AnswerLayer extends AgentLayer {
       question: request.message,
       columns: state.columns,
       rows: state.rows,
+      rowCount: state.rowCount,
     });
 
     const { content, tokenUsage } = await invokeText({

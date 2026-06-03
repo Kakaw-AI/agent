@@ -19,15 +19,18 @@ export class SuggestionsLayer extends AgentLayer {
     const prompt = new SuggestionsPromptBuilder().build({
       question: request.message,
       answer: state.answer,
+      columns: state.columns,
+      rowCount: state.rowCount,
       tableNames: request.knowledge.tables.map((t) => t.name).join(", "),
       summary: request.knowledge.summary,
     });
 
     try {
+      // Deliberately omit conversation history: follow-ups must be grounded in
+      // the CURRENT result, not drift toward earlier turns.
       const { value } = await invokeJson({
         llm: request.llm,
         ...prompt,
-        history: request.history,
         temperature: 0.5,
         onLlmCall: ctx.onLlmCall,
         onLlmResponse: ctx.onLlmResponse,
