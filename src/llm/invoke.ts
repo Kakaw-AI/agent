@@ -1,13 +1,16 @@
 import {
   AIMessage,
   HumanMessage,
-  SystemMessage,
 } from "@langchain/core/messages";
 import { LLM_TIMEOUT_MS } from "../config.js";
 import { LLMTimeoutException } from "../exceptions/LLMTimeoutException.js";
 import type { TokenUsage } from "../types.js";
 import { flattenContent } from "../utils/text.js";
-import { createLangChainModel, extractTokenUsage } from "./langchain.js";
+import {
+  buildSystemMessage,
+  createLangChainModel,
+  extractTokenUsage,
+} from "./langchain.js";
 import client from "./mcp.js";
 import { toLangChainMessages } from "./messages.js";
 import type {
@@ -37,7 +40,7 @@ export async function invokeText(
   const response = await Promise.race([
     langchainModel.invoke(
       [
-        new SystemMessage(input.systemPrompt),
+        buildSystemMessage(input.llm.provider, input.systemPrompt),
         ...toLangChainMessages(input.history ?? []),
         new HumanMessage(input.userPrompt),
       ],
@@ -88,7 +91,7 @@ export async function invokeJson<T>(
   });
 
   const { raw, parsed } = (await structured.invoke([
-    new SystemMessage(input.systemPrompt),
+    buildSystemMessage(input.llm.provider, input.systemPrompt),
     ...toLangChainMessages(input.history ?? []),
     new HumanMessage(input.userPrompt),
   ])) as { raw: AIMessage; parsed: T };

@@ -1,6 +1,7 @@
 import { ChatAnthropic } from "@langchain/anthropic";
 import {
-  AIMessage
+  AIMessage,
+  SystemMessage
 } from "@langchain/core/messages";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatOpenAI } from "@langchain/openai";
@@ -45,6 +46,33 @@ export function createLangChainModel(
   }
 }
 
+
+/**
+ * Builds the system message for an LLM call. For Anthropic the large, static
+ * system prompt (dialect rules + full schema catalog) is emitted as a single
+ * cache-controlled content block so repeated calls on the same schema (repair
+ * loops, follow-up questions) hit Anthropic's prompt cache instead of re-paying
+ * for the whole prefix. OpenAI/OpenRouter cache a stable prefix automatically,
+ * so a plain string suffices there.
+ */
+export function buildSystemMessage(
+  provider: LLMRuntime["provider"],
+  systemPrompt: string,
+): SystemMessage {
+  if (provider === "anthropic") {
+    return new SystemMessage({
+      content: [
+        {
+          type: "text",
+          text: systemPrompt,
+          cache_control: { type: "ephemeral" },
+        },
+      ],
+    });
+  }
+
+  return new SystemMessage(systemPrompt);
+}
 
 export function extractTokenUsage(response: AIMessage): TokenUsage | null {
   const usage = response.usage_metadata;

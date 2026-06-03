@@ -35,6 +35,12 @@ export const GraphState = Annotation.Root({
     reducer: (_left, right) => right,
     default: () => false,
   }),
+  // Set when the SQL was reused from the result cache (safe mode): SQL
+  // generation is skipped but execution still runs so the data stays fresh.
+  sqlFromCache: Annotation<boolean>({
+    reducer: (_left, right) => right,
+    default: () => false,
+  }),
   intentKind: Annotation<IntentKind>({
     reducer: (_left, right) => right,
     default: () => "data_answer",

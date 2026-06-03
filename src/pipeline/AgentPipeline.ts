@@ -1,4 +1,5 @@
 import { StateGraph } from "@langchain/langgraph";
+import { setCachedPlan } from "../llm/cache.js";
 import type { GraphStateValue } from "../llm/state.js";
 import { GraphState } from "../llm/state.js";
 import type { AgentRunRequest, AgentStreamEvent, TraceAnalyticsOutcome, VisualizationOutcome } from "../types.js";
@@ -127,10 +128,12 @@ export class AgentPipeline {
       }
 
       const graph = graphBuilder.compile();
-      const finalState = await graph.invoke({});
+      const finalState = (await graph.invoke({})) as GraphStateValue;
+
+      storeResultPlan(finalState);
 
       // emit terminal events — agent_step already went live during execution
-      for (const event of buildTerminalEvents(request, finalState as GraphStateValue)) {
+      for (const event of buildTerminalEvents(request, finalState)) {
         emitter.emit(event);
       }
 
@@ -155,6 +158,34 @@ export class AgentPipeline {
       emitter.finish();
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Result cache — persist a successful query plan so identical questions on the
+// same schema can skip SQL generation next time.
+// ---------------------------------------------------------------------------
+
+function storeResultPlan(finalState: GraphStateValue): void {
+  if (
+    !finalState.cacheKey ||
+    finalState.cacheHit ||
+    finalState.sqlFromCache ||
+    finalState.errorMessage ||
+    !finalState.sql ||
+    !finalState.answer
+  ) {
+    return;
+  }
+
+  setCachedPlan(finalState.cacheKey, {
+    sql: finalState.sql,
+    chartSpec: finalState.chartSpec ?? null,
+    answer: finalState.answer,
+    suggestions: finalState.suggestions,
+    rows: finalState.rows,
+    columns: finalState.columns,
+    rowCount: finalState.rowCount,
+  });
 }
 
 // ---------------------------------------------------------------------------

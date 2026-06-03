@@ -15,6 +15,7 @@ export class SqlGenerationLayer extends AgentLayer {
   shouldSkip(state: GraphStateValue): boolean {
     return (
       state.cacheHit ||
+      state.sqlFromCache ||
       state.intentKind === "small_talk" ||
       state.intentKind === "visualization_followup" ||
       !!state.answer ||

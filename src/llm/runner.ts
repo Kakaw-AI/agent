@@ -2,6 +2,7 @@ import type { AgentRunRequest, AgentStreamEvent } from "../types.js";
 import {
   AgentPipeline,
   AnswerLayer,
+  CacheLayer,
   ChartLayer,
   IntentLayer,
   SqlExecutionLayer,
@@ -12,6 +13,7 @@ import {
 function buildPipeline(): AgentPipeline {
   return new AgentPipeline()
     .use(new IntentLayer())
+    .use(new CacheLayer())
     .use(new SqlGenerationLayer())
     .use(new SqlExecutionLayer())
     .use(new AnswerLayer())
