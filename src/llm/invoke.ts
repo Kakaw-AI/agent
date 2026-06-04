@@ -1,3 +1,4 @@
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import {
   AIMessage,
   HumanMessage,
@@ -86,9 +87,14 @@ export async function invokeJson<T>(
 
   const langchainModel = createLangChainModel(input.llm, temperature);
 
-  const structured = langchainModel.withStructuredOutput(input.schema, {
-    includeRaw: true,
-  });
+  // Cast to the base type for this call: the concrete Chat* classes declare
+  // mutually-incompatible `withStructuredOutput` overloads, so calling it on
+  // their union fails to type-check (TS2349). The base type exposes a single
+  // compatible signature and the method exists on every provider at runtime.
+  const structured = (langchainModel as BaseChatModel).withStructuredOutput(
+    input.schema,
+    { includeRaw: true },
+  );
 
   const { raw, parsed } = (await structured.invoke([
     buildSystemMessage(input.llm.provider, input.systemPrompt),
