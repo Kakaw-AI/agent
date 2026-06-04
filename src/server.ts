@@ -2,13 +2,11 @@ import 'dotenv/config';
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { verifyIncomingSignature } from "./auth.js";
+import { loadInfisicalSecrets } from "./config/infisical.js";
 import { syncDatabase } from './database/knowledge.js';
 import { streamAgent } from './llm/runner.js';
 import type { AgentRunRequest, AgentSyncRequest } from "./types.js";
 
-
-const host = process.env.HOST?.trim() || "0.0.0.0";
-const port = Number(process.env.PORT ?? 8000);
 
 const server = createServer(async (request, response) => {
 
@@ -63,9 +61,23 @@ const server = createServer(async (request, response) => {
   }
 });
 
-server.listen(port, host, () => {
+async function main() {
+  // Load secrets (AGENT_SHARED_SECRET, etc.) before accepting requests.
+  await loadInfisicalSecrets();
+
+  const host = process.env.HOST?.trim() || "0.0.0.0";
+  const port = Number(process.env.PORT ?? 8000);
+
+  server.listen(port, host, () => {
+    // eslint-disable-next-line no-console
+    console.log(`agent-ts listening on http://${host}:${port}`);
+  });
+}
+
+main().catch((error) => {
   // eslint-disable-next-line no-console
-  console.log(`agent-ts listening on http://${host}:${port}`);
+  console.error("Failed to start agent-ts:", error);
+  process.exit(1);
 });
 
 function readBody(request: IncomingMessage): Promise<string> {

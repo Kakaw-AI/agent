@@ -11,6 +11,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@infisical/sdk": "^5.0.2",
     "@langchain/anthropic": "^0.3.16",
     "@langchain/core": "^1.1.39",
     "@langchain/google-genai": "^0.2.12",

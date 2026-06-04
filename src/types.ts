@@ -56,7 +56,10 @@ export type AgentDatabaseRuntime = {
   label: string;
   schemaFingerprint?: string;
   connectionString?: string;
-  sqliteFilePath?: string;
+  // R2 object key (stable per upload) used to cache the materialized file, plus
+  // a short-lived presigned GET URL the agent downloads from on a cache miss.
+  sqliteObjectKey?: string;
+  sqliteDownloadUrl?: string;
   sqliteOriginalFilename?: string;
 };
 

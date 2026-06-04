@@ -1,8 +1,8 @@
 import Database from "better-sqlite3";
 import { Pool } from "pg";
 import { MAX_RESULT_ROWS } from "../config.js";
-import { SQLException } from "../exceptions/SQLException.js";
 import type { AgentDatabaseRuntime } from "../types.js";
+import { materializeSqlite } from "./materialize.js";
 import { assertReadOnlySql } from "./safety.js";
 import { sanitizeRow } from "./sanitize.js";
 import { QueryResult } from "./types.js";
@@ -16,12 +16,10 @@ function getPool(connectionString: string): Pool {
   return pgPools.get(connectionString)!;
 }
 
-export function openSqlite(database: AgentDatabaseRuntime) {
-  if (!database.sqliteFilePath) {
-    throw new SQLException("SQLite runtime is missing sqliteFilePath.");
-  }
+export async function openSqlite(database: AgentDatabaseRuntime) {
+  const filePath = await materializeSqlite(database);
 
-  return new Database(database.sqliteFilePath, {
+  return new Database(filePath, {
     readonly: true,
     fileMustExist: true,
   });
@@ -34,7 +32,7 @@ export async function executeReadOnlyQuery(
   assertReadOnlySql(sql);
 
   if (database.provider === "sqlite") {
-    const db = openSqlite(database);
+    const db = await openSqlite(database);
     try {
       const statement = db.prepare(sql);
       const columns = statement.columns().map((column) => column.name);

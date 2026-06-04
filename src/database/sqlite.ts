@@ -4,8 +4,10 @@ import type { AgentDatabaseRuntime, DatabaseCatalogTable } from "../types.js";
 import { openSqlite } from "./query.js";
 import { collectSampleValues, normalizeName, sanitizeRow } from "./sanitize.js";
 
-export function introspectSqlite(database: AgentDatabaseRuntime): DatabaseCatalogTable[] {
-  const db = openSqlite(database);
+export async function introspectSqlite(
+  database: AgentDatabaseRuntime,
+): Promise<DatabaseCatalogTable[]> {
+  const db = await openSqlite(database);
   try {
     const tables = db
       .prepare(

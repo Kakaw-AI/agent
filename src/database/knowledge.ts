@@ -13,7 +13,7 @@ export async function syncDatabase(
 ): Promise<AgentSyncResponse> {
   const tables =
     database.provider === "sqlite"
-      ? introspectSqlite(database)
+      ? await introspectSqlite(database)
       : await introspectPostgres(database);
   const knowledgeDocuments = buildKnowledgeDocuments(database, tables);
   const schemaFingerprint = createHash("sha256")
