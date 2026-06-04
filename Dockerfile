@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1
 
 # ── build (full deps; native modules need a toolchain) ───────────────────────
+# The node:22-alpine image already bundles Yarn 1.x, so we use it directly.
 FROM node:22-alpine AS build
 WORKDIR /app
 RUN apk add --no-cache python3 make g++
-RUN npm install -g yarn@1.22.22
 COPY package.json yarn.lock ./
 RUN yarn install --frozen-lockfile
 COPY . .
@@ -14,7 +14,6 @@ RUN yarn build
 FROM node:22-alpine AS prod-deps
 WORKDIR /app
 RUN apk add --no-cache python3 make g++
-RUN npm install -g yarn@1.22.22
 COPY package.json yarn.lock ./
 RUN yarn install --frozen-lockfile --production
 
