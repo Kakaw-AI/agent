@@ -1,6 +1,14 @@
+import { context, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import type { AgentRunRequest } from "../types.js";
 import type { GraphStateValue } from "../llm/state.js";
 import type { LlmCallHook, LlmResponseHook } from "../llm/types.js";
+import {
+  emitLog,
+  layerDurationHistogram,
+  llmTokenCounter,
+  runCounter,
+  tracer,
+} from "../telemetry.js";
 
 const IS_DEV = process.env.NODE_ENV !== "production";
 
@@ -32,6 +40,11 @@ function write(line: string): void {
 
 function writeJson(obj: Record<string, unknown>): void {
   process.stderr.write(JSON.stringify({ ts: ts(), ...obj }) + "\n");
+  // Mirror the structured event as an OTLP log so it reaches Loki without the
+  // Docker-socket shipper. No-op when telemetry is disabled.
+  const event = typeof obj.event === "string" ? obj.event : "";
+  const level = /error|failed/.test(event) ? "error" : "info";
+  emitLog(level, obj, { event });
 }
 
 type LayerStats = {
@@ -46,6 +59,10 @@ export class PipelineLogger {
   private runStartMs = 0;
   private totalInTokens = 0;
   private totalOutTokens = 0;
+  // OpenTelemetry: one root span per run, one child span per layer. These are
+  // no-ops (non-recording spans) when telemetry is disabled.
+  private runSpan?: Span;
+  private layerSpans = new Map<string, Span>();
 
   constructor(request: AgentRunRequest) {
     this.request = request;
@@ -53,6 +70,15 @@ export class PipelineLogger {
 
   logRunStart(): void {
     this.runStartMs = Date.now();
+    // Root span; parents to the active (incoming HTTP) span automatically, so
+    // the trace links backend → agent → layers.
+    this.runSpan = tracer.startSpan("agent.run", {
+      attributes: {
+        "agent.request_id": this.request.requestId,
+        "agent.user_id": this.request.userId,
+        "agent.message_id": this.request.messageId,
+      },
+    });
     if (IS_DEV) {
       const sep = "━".repeat(65);
       write(`\n${BOLD}${CYAN}${sep}${R}`);
@@ -72,6 +98,16 @@ export class PipelineLogger {
 
   logLayerStarted(layerName: string): void {
     this.layerStats.set(layerName, { startMs: Date.now(), inTokens: 0, outTokens: 0 });
+    if (this.runSpan) {
+      this.layerSpans.set(
+        layerName,
+        tracer.startSpan(
+          `agent.layer ${layerName}`,
+          undefined,
+          trace.setSpan(context.active(), this.runSpan),
+        ),
+      );
+    }
     if (IS_DEV) {
       write(`\n  ${CYAN}▶${R} ${layerName}`);
     } else {
@@ -80,6 +116,7 @@ export class PipelineLogger {
   }
 
   logLayerSkipped(layerName: string): void {
+    this.runSpan?.addEvent("layer_skipped", { layer: layerName });
     if (IS_DEV) {
       write(`\n  ${GRAY}▶ ${layerName}  (skipped)${R}`);
     } else {
@@ -91,6 +128,24 @@ export class PipelineLogger {
     const stats = this.layerStats.get(layerName) ?? { startMs: 0, inTokens: 0, outTokens: 0 };
     this.totalInTokens += stats.inTokens;
     this.totalOutTokens += stats.outTokens;
+
+    layerDurationHistogram.record(durationMs, { "agent.layer": layerName });
+    if (stats.inTokens) {
+      llmTokenCounter.add(stats.inTokens, { "agent.layer": layerName, direction: "input" });
+    }
+    if (stats.outTokens) {
+      llmTokenCounter.add(stats.outTokens, { "agent.layer": layerName, direction: "output" });
+    }
+    const completedSpan = this.layerSpans.get(layerName);
+    if (completedSpan) {
+      completedSpan.setAttributes({
+        "agent.layer.duration_ms": durationMs,
+        "agent.llm.input_tokens": stats.inTokens,
+        "agent.llm.output_tokens": stats.outTokens,
+      });
+      completedSpan.end();
+      this.layerSpans.delete(layerName);
+    }
 
     if (IS_DEV) {
       const tokenPart = stats.inTokens > 0 ? `  ${GRAY}${tokStr(stats.inTokens, stats.outTokens)}${R}` : "";
@@ -108,6 +163,14 @@ export class PipelineLogger {
 
   logLayerError(layerName: string, error: unknown, durationMs: number): void {
     const message = error instanceof Error ? error.message : String(error);
+    layerDurationHistogram.record(durationMs, { "agent.layer": layerName, error: true });
+    const erroredSpan = this.layerSpans.get(layerName);
+    if (erroredSpan) {
+      erroredSpan.recordException(message);
+      erroredSpan.setStatus({ code: SpanStatusCode.ERROR, message });
+      erroredSpan.end();
+      this.layerSpans.delete(layerName);
+    }
     if (IS_DEV) {
       write(`  ${RED}✗${R} ${layerName}  ${RED}ERROR${R} after ${fmt(durationMs)}`);
       write(`    ${DIM}${message}${R}`);
@@ -118,6 +181,17 @@ export class PipelineLogger {
 
   logRunEnd(finalState: Partial<GraphStateValue>, durationMs: number): void {
     const outcome = (finalState as any).analyticsOutcome ?? "unknown";
+    runCounter.add(1, { outcome: String(outcome) });
+    if (this.runSpan) {
+      this.runSpan.setAttributes({
+        "agent.outcome": String(outcome),
+        "agent.llm.total_input_tokens": this.totalInTokens,
+        "agent.llm.total_output_tokens": this.totalOutTokens,
+        "agent.duration_ms": durationMs,
+      });
+      this.runSpan.end();
+      this.runSpan = undefined;
+    }
     if (IS_DEV) {
       const sep = "━".repeat(65);
       write(`\n${BOLD}${CYAN}${sep}${R}`);
@@ -134,6 +208,13 @@ export class PipelineLogger {
   }
 
   logRunError(message: string, durationMs: number): void {
+    runCounter.add(1, { outcome: "error" });
+    if (this.runSpan) {
+      this.runSpan.recordException(message);
+      this.runSpan.setStatus({ code: SpanStatusCode.ERROR, message });
+      this.runSpan.end();
+      this.runSpan = undefined;
+    }
     if (IS_DEV) {
       const sep = "━".repeat(65);
       write(`\n${BOLD}${RED}${sep}${R}`);

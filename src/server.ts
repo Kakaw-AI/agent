@@ -5,6 +5,7 @@ import { verifyIncomingSignature } from "./auth.js";
 import { loadInfisicalSecrets } from "./config/infisical.js";
 import { syncDatabase } from './database/knowledge.js';
 import { streamAgent } from './llm/runner.js';
+import { emitLog } from "./telemetry.js";
 import type { AgentRunRequest, AgentSyncRequest } from "./types.js";
 
 
@@ -57,6 +58,7 @@ const server = createServer(async (request, response) => {
   } catch (error) {
     const message = error instanceof Error && error.message.trim() ? error.message.trim() : "Unexpected agent failure.";
     console.error("Error handling request:", { message, statusCode: 500 });
+    emitLog("error", `Error handling request: ${message}`, { statusCode: 500, url: request.url ?? "" });
     writeJson(response, 500, { error: { message, code: "AGENT_RUNTIME_ERROR", statusCode: 500, retryable: false } });
   }
 });
@@ -71,12 +73,14 @@ async function main() {
   server.listen(port, host, () => {
     // eslint-disable-next-line no-console
     console.log(`agent-ts listening on http://${host}:${port}`);
+    emitLog("info", `agent-ts listening on http://${host}:${port}`, { event: "startup" });
   });
 }
 
 main().catch((error) => {
   // eslint-disable-next-line no-console
   console.error("Failed to start agent-ts:", error);
+  emitLog("error", `Failed to start agent-ts: ${error instanceof Error ? error.message : String(error)}`, { event: "startup_failed" });
   process.exit(1);
 });
 

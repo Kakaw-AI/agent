@@ -29,4 +29,7 @@ COPY --from=build /app/dist ./dist
 COPY package.json ./
 USER node
 EXPOSE 8000
-CMD ["node", "dist/server.js"]
+# Preload the OpenTelemetry ESM hook + SDK before the server so auto-
+# instrumentations can patch http/pg/undici. Telemetry stays off unless
+# OTEL_EXPORTER_OTLP_ENDPOINT is set.
+CMD ["node", "--import", "@opentelemetry/instrumentation/hook.mjs", "--import", "./dist/telemetry.js", "dist/server.js"]
