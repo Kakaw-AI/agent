@@ -72,23 +72,28 @@ export abstract class BaseSqlPromptBuilder {
     ].join("\n");
   }
 
+  /**
+   * Repair variant of the system prompt.
+   *
+   * Deliberately free of the failing SQL and the error text. Anthropic prompt
+   * caching marks the whole system string as one cacheable block, so appending
+   * per-attempt detail here changed the block on every retry and re-charged the
+   * full schema catalog each time. The volatile detail now travels in the user
+   * message; this differs from the initial prompt only by one fixed sentence.
+   */
   protected buildRepairPrompt(
     knowledge: DatabaseKnowledgeRuntime,
-    sql: string,
-    error: string,
     options: SqlPromptOptions,
   ): string {
     return [
       this.buildInitialPrompt(knowledge, options),
-      "The prior SQL failed. Repair it and return JSON with only the replacement SQL.",
-      `Previous SQL: ${sql}`,
-      `Database error: ${error}`,
+      "The prior SQL failed. Repair it and return JSON with only the replacement SQL. The failing SQL and the database error appear in the user message.",
     ].join("\n");
   }
 
   build({ knowledge, options = {}, repair }: SqlPromptBuildInput): string {
     if (repair) {
-      return this.buildRepairPrompt(knowledge, repair.sql, repair.error, options);
+      return this.buildRepairPrompt(knowledge, options);
     }
     return this.buildInitialPrompt(knowledge, options);
   }

@@ -5,17 +5,30 @@ import {
   inferTextColumns,
   isTemporalField,
 } from "../database/row-inference.js";
+import {
+  IDENTIFIER_THRESHOLDS,
+  identifierTokens,
+  identifiersMatch,
+} from "../database/identifier-match.js";
 import { findColumnByName, normalizeColumnName } from "../database/sanitize.js";
-import { normalizeQuestion, toReadableLabel } from "../utils/text.js";
+import { tokenizeQuestion } from "../llm/intent/text.js";
+import { toReadableLabel } from "../utils/text.js";
 import type { DeterministicChartSpecInput, FallbackChartSpec } from "./types.js";
 
 function extractMetricComparisonFields(question: string, numericColumns: string[]) {
-  const normalizedQuestion = normalizeQuestion(question);
+  const questionTokens = tokenizeQuestion(question);
+  // Slides a window the width of the column's own token count across the
+  // question and scores it. A literal regex over the column name misses
+  // "compare total_reveneu vs order_count" entirely.
   const matchedColumns = numericColumns.filter((column) => {
-    const normalizedColumn = normalizeColumnName(column);
-    return new RegExp(`\\b${normalizedColumn.replace(/_/g, "[_\\s]+")}\\b`, "i").test(
-      normalizedQuestion,
-    );
+    const width = Math.max(1, identifierTokens(column).length);
+    for (let start = 0; start + width <= questionTokens.length; start += 1) {
+      const window = questionTokens.slice(start, start + width).join("_");
+      if (identifiersMatch(window, column, IDENTIFIER_THRESHOLDS.autoAccept)) {
+        return true;
+      }
+    }
+    return false;
   });
 
   if (matchedColumns.length >= 2 && /\b(vs|versus|compare|comparison|correlation|relationship)\b/i.test(question)) {

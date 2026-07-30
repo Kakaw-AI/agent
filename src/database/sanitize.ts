@@ -1,3 +1,9 @@
+import {
+  IDENTIFIER_THRESHOLDS,
+  bestMatch,
+  normalizeIdentifier,
+} from "./identifier-match.js";
+
 const SECRET_FIELD_PATTERN = /(password|secret|token|key|credential|auth|session)/i;
 
 export function collectSampleValues(rows: Array<Record<string, unknown>>, columnName: string) {
@@ -8,12 +14,7 @@ export function collectSampleValues(rows: Array<Record<string, unknown>>, column
 }
 
 export function normalizeName(value: string) {
-  return value
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[^\w]+/g, "_")
-    .replace(/__+/g, "_")
-    .replace(/^_|_$/g, "");
+  return normalizeIdentifier(value);
 }
 
 export function sanitizeRow(row: Record<string, unknown>) {
@@ -51,17 +52,39 @@ function sanitizeValue(key: string, value: unknown): unknown {
   return value;
 }
 export function normalizeColumnName(value: string) {
-  return value.trim().toLowerCase().replace(/\s+/g, "_");
+  return normalizeIdentifier(value);
 }
 
+/**
+ * Resolves a result-set column by name: exact, then normalized, then a
+ * conservative fuzzy match. The fuzzy stage covers the case where the model
+ * aliased a column slightly differently from the name the caller expects.
+ */
 export function findColumnByName(columns: string[], candidate: string | null | undefined) {
   if (!candidate) {
     return null;
   }
 
+  const exact = columns.find((column) => column === candidate);
+  if (exact) {
+    return exact;
+  }
+
   const normalizedCandidate = normalizeColumnName(candidate);
+  const normalized = columns.find(
+    (column) => normalizeColumnName(column) === normalizedCandidate,
+  );
+  if (normalized) {
+    return normalized;
+  }
+
   return (
-    columns.find((column) => normalizeColumnName(column) === normalizedCandidate) ?? null
+    bestMatch(
+      candidate,
+      columns,
+      (column) => column,
+      IDENTIFIER_THRESHOLDS.sqlAutoCorrect,
+    )?.item ?? null
   );
 }
 export function extractPostgresIndexColumns(indexDefinition: string) {

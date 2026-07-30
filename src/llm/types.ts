@@ -30,6 +30,11 @@ export type InvokeTextInput = {
   onLlmResponse?: LlmResponseHook;
 };
 
+export type InvokeTextStreamInput = InvokeTextInput & {
+  /** Called for every non-empty chunk as it arrives. */
+  onDelta: (delta: string) => void;
+};
+
 export type LLMJsonInput<T> = {
   llm: AgentLlmRuntime;
   systemPrompt: string;

@@ -1,3 +1,4 @@
+import { didYouMeanFromEntries } from "../../graph/field-resolution.js";
 import { assessVisualizationSqlDraft, buildVisualizationSqlExhaustedOutcome } from "../../graph/qa/assessment.js";
 import { invokeJson } from "../../llm/invoke.js";
 import { SqlWithRationaleSchema } from "../../llm/schemas.js";
@@ -30,6 +31,8 @@ export class SqlGenerationLayer extends AgentLayer {
     let lastSql = "";
     let lastRationale: string | null = null;
     let priorErrors: string[] = [];
+    // Fields the intent layer could not confidently map to a catalog column.
+    const didYouMean = didYouMeanFromEntries(state.fieldResolutions ?? []);
     const MAX_DRAFT_ATTEMPTS = 3;
 
     for (let attempt = 0; attempt < MAX_DRAFT_ATTEMPTS; attempt += 1) {
@@ -56,6 +59,10 @@ export class SqlGenerationLayer extends AgentLayer {
             needsImplicitCountMetric: state.needsImplicitCountMetric,
             priorSql: attempt > 0 ? lastSql : null,
             priorErrors,
+            // Fields we could not confidently map to a column. Handing the model
+            // the nearest catalog names costs nothing and beats letting it
+            // invent one.
+            fieldSuggestions: didYouMean,
           }),
           history: request.history,
           temperature: 0.1,
@@ -96,6 +103,6 @@ export class SqlGenerationLayer extends AgentLayer {
       }
     }
 
-    return buildVisualizationSqlExhaustedOutcome(priorErrors);
+    return buildVisualizationSqlExhaustedOutcome(priorErrors, didYouMean);
   }
 }

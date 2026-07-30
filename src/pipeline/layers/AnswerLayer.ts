@@ -1,5 +1,5 @@
 import { buildNoRowsAnswer } from "../../llm/answers.js";
-import { invokeText } from "../../llm/invoke.js";
+import { invokeTextStream } from "../../llm/invoke.js";
 import type { GraphStateValue } from "../../llm/state.js";
 import { AnswerPromptBuilder } from "../../prompts/AnswerPromptBuilder.js";
 import type { AgentRunRequest } from "../../types.js";
@@ -35,13 +35,18 @@ export class AnswerLayer extends AgentLayer {
       rowCount: state.rowCount,
     });
 
-    const { content, tokenUsage } = await invokeText({
+    const { content, tokenUsage } = await invokeTextStream({
       llm: request.llm,
       ...prompt,
       history: request.history,
       temperature: 0.2,
       onLlmCall: ctx.onLlmCall,
       onLlmResponse: ctx.onLlmResponse,
+      onDelta: (delta) =>
+        ctx.emit({
+          type: "message_delta",
+          data: { messageId: request.messageId, delta },
+        }),
     });
 
     return {

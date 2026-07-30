@@ -1,5 +1,11 @@
 export type DatabaseCatalogColumn = {
   name: string;
+  /**
+   * Wire-compatibility only. This is computed at sync time and stored by the
+   * backend, so a value arriving on a request may have been produced by an
+   * older build. Anything that needs a normalized form recomputes it via
+   * `normalizeIdentifier` rather than trusting this field.
+   */
   normalizedName: string;
   dataType: string;
   isNullable: boolean;
@@ -115,6 +121,13 @@ export type TokenUsage = {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  /**
+   * Prompt-cache accounting. Without these, cache effectiveness is invisible
+   * and there is no way to tell whether the cacheable system prefix is actually
+   * being reused.
+   */
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
 };
 
 export type VisualizationRequest = {
@@ -194,6 +207,11 @@ export type VisualizationChartSpec = VisualizationChartSpecBase & Record<string,
 export type AgentStreamEvent =
   | { type: "message_started"; data: { messageId: string } }
   | { type: "agent_step"; data: { text: string; at?: string } }
+  /**
+   * Incremental answer text. The backend accumulates these into the assistant
+   * message and the frontend renders them as they arrive.
+   */
+  | { type: "message_delta"; data: { messageId: string; delta: string } }
   | { type: "sql_generated"; data: { sql: string } }
   | {
       type: "sql_result";

@@ -43,6 +43,10 @@ export type SqlPromptOptions = {
   visualizationRequest?: VisualizationRequest | null;
 };
 
+/**
+ * Marks a build as a repair attempt. The failing SQL and error are carried in
+ * the user prompt, not here, so the cacheable system prefix stays stable.
+ */
 export type SqlRepairContext = {
   sql: string;
   error: string;
@@ -67,11 +71,34 @@ export type VisualizationSqlDraftInput = {
   visualizationRequest: VisualizationRequest | null;
 };
 
+/** How a field named in the user's question was matched against the catalog. */
+export type FieldResolutionKind =
+  | "unchanged"
+  | "corrected"
+  | "ambiguous"
+  | "unresolved"
+  | "reserved";
+
+export type FieldResolutionEntry = {
+  slot: "category" | "metric" | "series" | "group";
+  index: number;
+  original: string;
+  resolved: string | null;
+  qualifiedName: string | null;
+  score: number;
+  kind: FieldResolutionKind;
+  suggestions: string[];
+};
+
 export type VisualizationSqlUserPromptInput = {
   question: string;
   visualizationRequest: VisualizationRequest | null;
   needsImplicitCountMetric: boolean;
   priorSql?: string | null;
   priorErrors?: string[];
+  /** Rendered driver error, hint and nearest-catalog-name candidates. */
+  dbErrorBlock?: string | null;
+  /** Catalog names close to fields the user asked for but we could not resolve. */
+  fieldSuggestions?: Array<{ field: string; candidates: string[] }>;
 };
 

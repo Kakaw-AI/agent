@@ -1,5 +1,6 @@
 import { Annotation } from "@langchain/langgraph";
 import { IntentKind } from "../graph/types.js";
+import type { FieldResolutionEntry } from "../graph/types.js";
 import type { TokenUsage, VisualizationCapabilityDecision, VisualizationChartSpec, VisualizationRequest, VisualizationValidationStatus } from "../types.js";
 import { mergeTokenUsage } from "../utils/token.js";
 
@@ -95,6 +96,18 @@ export const GraphState = Annotation.Root({
   }),
   repairHistory: Annotation<Array<Record<string, unknown>>>({
     reducer: (left, right) => left.concat(right),
+    default: () => [],
+  }),
+  /**
+   * Identifiers this run rewrote to match the catalog, so callers can assert on
+   * structure instead of scraping step text.
+   */
+  schemaCorrections: Annotation<Array<{ from: string; to: string; stage: string }>>({
+    reducer: (left, right) => left.concat(right),
+    default: () => [],
+  }),
+  fieldResolutions: Annotation<FieldResolutionEntry[]>({
+    reducer: (_left, right) => right,
     default: () => [],
   }),
 });

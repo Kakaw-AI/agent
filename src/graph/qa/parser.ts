@@ -1,10 +1,8 @@
 // It's main role convert SQL to a structured format that can be used to assess the SQL and plan visualizations based on it. It also includes some utilities for parsing SQL.
+import { normalizeIdentifier } from "../../database/identifier-match.js";
+
 export function normalizeSqlIdentifier(value: string): string {
-  return value
-    .trim()
-    .replace(/^["'`]+|["'`]+$/g, "")
-    .toLowerCase()
-    .replace(/\s+/g, "_");
+  return normalizeIdentifier(value);
 }
 
 export function splitSqlSelectList(selectClause: string): string[] {

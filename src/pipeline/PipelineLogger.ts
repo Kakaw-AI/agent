@@ -34,6 +34,15 @@ function tokStr(inTok: number, outTok: number): string {
   return `in=${inTok.toLocaleString()} out=${outTok.toLocaleString()} tokens`;
 }
 
+/** Caps a logged prompt or response so log volume stays independent of prompt size. */
+const LOG_TEXT_LIMIT = 2000;
+
+function truncateForLog(value: string): string {
+  return value.length <= LOG_TEXT_LIMIT
+    ? value
+    : `${value.slice(0, LOG_TEXT_LIMIT)}… [${value.length - LOG_TEXT_LIMIT} more chars]`;
+}
+
 function write(line: string): void {
   process.stderr.write(line + "\n");
 }
@@ -234,13 +243,18 @@ export class PipelineLogger {
         write(`    ${DIM}USER:   ${userPrompt.slice(0, 120).replace(/\n/g, " ")}${R}`);
         write(`    ${"─".repeat(50)}`);
       } else {
+        // Truncated: the system prompt carries the entire schema catalog, so
+        // logging it whole made production log volume scale with prompt size,
+        // to stderr and OTLP both.
         writeJson({
           event: "llm_call",
           layer: layerName,
           model,
           temperature,
-          systemPrompt,
-          userPrompt,
+          systemPromptLength: systemPrompt.length,
+          systemPrompt: truncateForLog(systemPrompt),
+          userPromptLength: userPrompt.length,
+          userPrompt: truncateForLog(userPrompt),
         });
       }
       // suppress unused warning — stats will be updated by onLlmResponse
@@ -266,7 +280,10 @@ export class PipelineLogger {
           layer: layerName,
           inTokens: inTok,
           outTokens: outTok,
-          content,
+          cacheReadTokens: tokenUsage?.cacheReadTokens ?? 0,
+          cacheWriteTokens: tokenUsage?.cacheWriteTokens ?? 0,
+          contentLength: content.length,
+          content: truncateForLog(content),
         });
       }
     };

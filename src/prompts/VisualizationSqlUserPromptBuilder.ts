@@ -31,6 +31,23 @@ export class VisualizationSqlUserPromptBuilder {
       lines.push(`Previous draft issues: ${input.priorErrors.join(" ")}`);
     }
 
+    // The volatile half of a repair lives here rather than in the system
+    // prompt, so the schema catalog above it stays byte-identical between the
+    // first attempt and every retry and can be served from the prompt cache.
+    if (input.dbErrorBlock) {
+      lines.push(input.dbErrorBlock);
+    }
+
+    if (input.fieldSuggestions && input.fieldSuggestions.length > 0) {
+      for (const suggestion of input.fieldSuggestions) {
+        if (suggestion.candidates.length > 0) {
+          lines.push(
+            `No catalog column matches "${suggestion.field}". Closest candidates: ${suggestion.candidates.join(", ")}.`,
+          );
+        }
+      }
+    }
+
     return lines.join("\n");
   }
 }

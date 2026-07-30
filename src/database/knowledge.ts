@@ -16,9 +16,7 @@ export async function syncDatabase(
       ? await introspectSqlite(database)
       : await introspectPostgres(database);
   const knowledgeDocuments = buildKnowledgeDocuments(database, tables);
-  const schemaFingerprint = createHash("sha256")
-    .update(JSON.stringify({ provider: database.provider, tables }))
-    .digest("hex");
+  const schemaFingerprint = fingerprintCatalog(database.provider, tables);
 
   return {
     sourceId: database.sourceId,
@@ -36,6 +34,38 @@ export async function syncDatabase(
       knowledgeDocuments,
     },
   };
+}
+
+/**
+ * Hashes only the facts that describe the database itself.
+ *
+ * Hashing the whole table objects would fold in fields we derive locally —
+ * `normalizedName` above all — so changing how we normalize would invalidate
+ * every stored fingerprint and force a full re-sync of every source. The
+ * fingerprint should change when the customer's schema changes, and not before.
+ */
+function fingerprintCatalog(
+  provider: string,
+  tables: DatabaseCatalogTable[],
+): string {
+  const projection = {
+    provider,
+    tables: tables.map((table) => ({
+      schemaName: table.schemaName ?? null,
+      name: table.name,
+      columns: table.columns.map((column) => [
+        column.name,
+        column.dataType,
+        column.isNullable,
+        column.isPrimaryKey,
+        column.ordinalPosition,
+      ]),
+      indexes: table.indexes,
+      foreignKeys: table.foreignKeys,
+    })),
+  };
+
+  return createHash("sha256").update(JSON.stringify(projection)).digest("hex");
 }
 
 function buildKnowledgeDocuments(

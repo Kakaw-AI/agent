@@ -1,3 +1,7 @@
+import {
+  IDENTIFIER_THRESHOLDS,
+  identifiersMatch,
+} from "../database/identifier-match.js";
 import { countDistinctRowValues } from "../database/row-inference.js";
 import { normalizeColumnName } from "../database/sanitize.js";
 import type {
@@ -96,9 +100,15 @@ export function validateVisualizationResult(
 ): VisualizationValidationResult {
   const requiredFields = getRequiredVisualizationFields(input.request);
   const availableColumns = new Set(input.columns.map((column) => normalizeColumnName(column)));
-  const droppedFields = requiredFields.filter(
-    (field) => !availableColumns.has(normalizeColumnName(field)),
-  );
+  const droppedFields = requiredFields.filter((field) => {
+    // Exact-normalized is the fast path; only fields that miss pay for a scan.
+    if (availableColumns.has(normalizeColumnName(field))) {
+      return false;
+    }
+    return !input.columns.some((column) =>
+      identifiersMatch(column, field, IDENTIFIER_THRESHOLDS.sqlAutoCorrect),
+    );
+  });
   const errors = droppedFields.map(
     (field) => `The result set is missing requested visualization field "${field}".`,
   );

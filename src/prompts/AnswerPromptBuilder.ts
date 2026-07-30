@@ -1,5 +1,6 @@
 // agent-ts/src/prompts/AnswerPromptBuilder.ts
 
+import { MAX_ANSWER_PROMPT_ROWS } from "../config.js";
 import type { AnswerPromptInput } from "./types.js";
 
 export class AnswerPromptBuilder {
@@ -26,23 +27,91 @@ export class AnswerPromptBuilder {
     "4. VISUALIZATION REQUESTS",
     "- If the user asked for a chart, do NOT build data structures for one. State the single most important takeaway in one sentence and let the downstream UI render the chart.",
 
-    "5. SEARCH POLICY",
-    "- You may use the search tool ONLY to clarify a specific term/abbreviation that appears in the results, citing it as 'According to [source], [fact].'",
-    "- The search tool may NEVER be used to answer the question itself; the SQL results are the sole source of truth.",
+    // The former "SEARCH POLICY" section described a web-search tool. The
+    // answer call is now streamed and passes no tools, and the previous
+    // non-streaming path had no tool-call loop either — a tool-use response
+    // flattened to an empty answer. Promising a tool that cannot be invoked
+    // only invites that failure.
   ];
   build(input: AnswerPromptInput): {
     systemPrompt: string;
     userPrompt: string;
   } {
+    const sample = input.rows.slice(0, MAX_ANSWER_PROMPT_ROWS);
+    const omitted = input.rows.length - sample.length;
+
+    const lines = [
+      `Question: ${input.question}`,
+      "",
+      `Total rows returned: ${input.rowCount} (the full table is already displayed to the user — summarize, do not relist it).`,
+      `Columns: ${input.columns.join(", ")}`,
+    ];
+
+    // Aggregates cover what the truncated tail would otherwise have shown: the
+    // model can still state ranges and totals accurately without being handed
+    // every row.
+    const stats = summarizeColumns(input.columns, input.rows);
+    if (stats.length > 0) {
+      lines.push(`Column statistics over all ${input.rowCount} rows: ${stats.join("; ")}`);
+    }
+
+    lines.push(
+      omitted > 0
+        ? `First ${sample.length} rows (a sample of ${input.rows.length}; ${omitted} more are in the table the user can see): ${JSON.stringify(sample)}`
+        : `Rows (source of truth, for your analysis only): ${JSON.stringify(sample)}`,
+    );
+
     return {
       systemPrompt: AnswerPromptBuilder.SYSTEM_INSTRUCTIONS.join(" "),
-      userPrompt: [
-        `Question: ${input.question}`,
-        "",
-        `Total rows returned: ${input.rowCount} (the full table is already displayed to the user — summarize, do not relist it).`,
-        `Columns: ${input.columns.join(", ")}`,
-        `Rows (source of truth, for your analysis only): ${JSON.stringify(input.rows)}`,
-      ].join("\n"),
+      userPrompt: lines.join("\n"),
     };
   }
+}
+
+/**
+ * Compact per-column facts: numeric range and total, or distinct count for
+ * everything else.
+ */
+function summarizeColumns(
+  columns: string[],
+  rows: Array<Record<string, unknown>>,
+): string[] {
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const summaries: string[] = [];
+
+  for (const column of columns) {
+    const values = rows
+      .map((row) => row[column])
+      .filter((value) => value !== null && value !== undefined);
+
+    if (values.length === 0) {
+      continue;
+    }
+
+    const numbers = values
+      .map((value) => (typeof value === "number" ? value : Number(value)))
+      .filter((value) => Number.isFinite(value));
+
+    if (numbers.length === values.length) {
+      const min = Math.min(...numbers);
+      const max = Math.max(...numbers);
+      const sum = numbers.reduce((total, value) => total + value, 0);
+      summaries.push(
+        `${column}: min ${min}, max ${max}, sum ${roundForPrompt(sum)}, avg ${roundForPrompt(sum / numbers.length)}`,
+      );
+      continue;
+    }
+
+    const distinct = new Set(values.map((value) => String(value))).size;
+    summaries.push(`${column}: ${distinct} distinct values`);
+  }
+
+  return summaries;
+}
+
+function roundForPrompt(value: number): number {
+  return Number.isInteger(value) ? value : Number(value.toFixed(4));
 }
