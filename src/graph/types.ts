@@ -96,6 +96,8 @@ export type VisualizationSqlUserPromptInput = {
   needsImplicitCountMetric: boolean;
   priorSql?: string | null;
   priorErrors?: string[];
+  /** Verified question/SQL pairs from this database's history. */
+  examples?: Array<{ question: string; sql: string }>;
   /** Rendered driver error, hint and nearest-catalog-name candidates. */
   dbErrorBlock?: string | null;
   /** Catalog names close to fields the user asked for but we could not resolve. */

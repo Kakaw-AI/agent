@@ -39,6 +39,30 @@ export class CacheLayer extends AgentLayer {
     const cached = getCachedPlan(cacheKey);
 
     if (!cached) {
+      // The in-process cache is empty on a cold process and expires after 15
+      // minutes. Query memory is the durable equivalent: the backend resolved
+      // an exact question match against SQL this source has already run, so
+      // generation can be skipped even across restarts and replicas. The query
+      // is still re-executed, so the answer reflects current data.
+      const exactPlan = request.retrieval?.exactPlan;
+      if (exactPlan?.sql) {
+        const text = "Reusing a query this database has answered before...";
+        ctx.emit({ type: "agent_step", data: { text, at: new Date().toISOString() } });
+        return {
+          cacheKey,
+          sqlFromCache: true,
+          sql: exactPlan.sql,
+          steps: [{ text, at: new Date().toISOString() }],
+          toolCalls: [
+            {
+              tool: "query_memory",
+              hit: "exact",
+              memoryId: exactPlan.memoryId,
+            },
+          ],
+        };
+      }
+
       return { cacheKey };
     }
 

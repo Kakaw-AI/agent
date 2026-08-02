@@ -59,6 +59,7 @@ export class SqlGenerationLayer extends AgentLayer {
             needsImplicitCountMetric: state.needsImplicitCountMetric,
             priorSql: attempt > 0 ? lastSql : null,
             priorErrors,
+            examples: request.retrieval?.examples,
             // Fields we could not confidently map to a column. Handing the model
             // the nearest catalog names costs nothing and beats letting it
             // invent one.

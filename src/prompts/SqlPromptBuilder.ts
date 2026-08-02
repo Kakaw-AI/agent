@@ -1,3 +1,4 @@
+import { renderCatalogLine } from "../database/catalog-render.js";
 import type { DatabaseCatalogTable, DatabaseKnowledgeRuntime } from "../types.js";
 import { getRequiredVisualizationFields } from "../graph/visualization.js";
 import type { SqlPromptBuildInput, SqlPromptOptions } from "../graph/types.js";
@@ -35,22 +36,8 @@ export abstract class BaseSqlPromptBuilder {
   }
 
   protected buildSchemaLine(table: DatabaseCatalogTable): string {
-    const columns = table.columns
-      .map(
-        (column) =>
-          `${column.name} (${column.dataType}${column.isPrimaryKey ? ", PK" : ""}${column.isNullable ? "" : ", NOT NULL"})`,
-      )
-      .join(", ");
-
-    const relationships =
-      table.foreignKeys.length > 0
-        ? table.foreignKeys
-            .map((fk) => `${fk.sourceColumn} -> ${fk.targetTable}.${fk.targetColumn}`)
-            .join("; ")
-        : "none";
-
-    const tablePrefix = table.schemaName ? `${table.schemaName}.` : "";
-    return `${tablePrefix}${table.name}: ${columns}. relationships: ${relationships}`;
+    // Shared with the sync-time size estimate so the two cannot drift.
+    return renderCatalogLine(table);
   }
 
   protected buildInitialPrompt(

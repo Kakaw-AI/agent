@@ -5,6 +5,10 @@ import type {
   DatabaseCatalogTable,
   DatabaseKnowledgeDocument,
 } from "../types.js";
+import {
+  countCatalogColumns,
+  estimateCatalogTokens,
+} from "./catalog-render.js";
 import { introspectPostgres } from "./postgres.js";
 import { introspectSqlite } from "./sqlite.js";
 
@@ -28,6 +32,11 @@ export async function syncDatabase(
       provider: database.provider,
       tableCount: tables.length,
       documentCount: knowledgeDocuments.length,
+      // Recorded so the catalog size distribution across real sources is
+      // queryable. The subsetting threshold is a decision about this number,
+      // and until it is measured there is nothing to decide against.
+      columnCount: countCatalogColumns(tables),
+      estimatedCatalogTokens: estimateCatalogTokens(tables),
     },
     catalog: {
       tables,

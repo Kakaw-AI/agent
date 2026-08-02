@@ -3,9 +3,39 @@
 import { getRequiredVisualizationFields } from "../graph/visualization.js";
 import type { VisualizationSqlUserPromptInput } from "../graph/types.js";
 
+/** Characters of examples before we stop adding more. */
+const MAX_EXAMPLE_CHARS = 2400;
+
 export class VisualizationSqlUserPromptBuilder {
   build(input: VisualizationSqlUserPromptInput): string {
-    const lines = [`Question: ${input.question}`];
+    const lines: string[] = [];
+
+    // Exemplars come before the question, which is the conventional few-shot
+    // layout. They are SQL only — a stored rationale is noise the model would
+    // imitate rather than learn from.
+    if (input.examples && input.examples.length > 0) {
+      const rendered: string[] = [];
+      let budget = MAX_EXAMPLE_CHARS;
+
+      for (const example of input.examples) {
+        const block = `Q: ${example.question}\nSQL: ${example.sql}`;
+        if (block.length > budget) {
+          break;
+        }
+        budget -= block.length;
+        rendered.push(block);
+      }
+
+      if (rendered.length > 0) {
+        lines.push(
+          "Similar questions previously answered correctly on this database:",
+          ...rendered,
+          "",
+        );
+      }
+    }
+
+    lines.push(`Question: ${input.question}`);
 
     if (input.visualizationRequest) {
       const requiredFields = getRequiredVisualizationFields(input.visualizationRequest);

@@ -1,3 +1,30 @@
+/**
+ * SQL this data source has already used to answer this exact question,
+ * resolved by the backend from query memory. Reusing it skips generation; the
+ * agent still re-executes so the data is fresh.
+ */
+export type AgentExactPlan = {
+  memoryId: string;
+  sql: string;
+};
+
+/** A past question on this source, with the SQL that answered it. */
+export type AgentQueryExample = {
+  question: string;
+  sql: string;
+};
+
+/** Everything the backend retrieved for this turn. */
+export type AgentRetrievalContext = {
+  exactPlan?: AgentExactPlan;
+  /**
+   * Verified question/SQL pairs from this database's own history, injected as
+   * few-shot examples. They live in the user message, never the system prompt,
+   * so the cacheable schema-catalog prefix stays byte-identical.
+   */
+  examples?: AgentQueryExample[];
+};
+
 export type DatabaseCatalogColumn = {
   name: string;
   /**
@@ -95,6 +122,7 @@ export type AgentRunRequest = {
   database: AgentDatabaseRuntime;
   knowledge: DatabaseKnowledgeRuntime;
   llm: AgentLlmRuntime;
+  retrieval?: AgentRetrievalContext;
 };
 
 export type AgentSyncRequest = {
