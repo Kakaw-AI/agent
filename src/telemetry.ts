@@ -8,6 +8,12 @@
 //   OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 //   OTEL_SERVICE_NAME=kakaw-agent
 // Telemetry stays OFF unless an endpoint is configured.
+//
+// Latitude (LLM tracing) is configured separately and independently, via
+// LATITUDE_API_KEY / LATITUDE_PROJECT_SLUG — see the bottom of this file.
+import * as CallbackManagerModule from "@langchain/core/callbacks/manager";
+import { Latitude } from "@latitude-data/telemetry";
+import { createLangChainInstrumentation } from "@latitude-data/telemetry/instrumentations/langchain";
 import { metrics, trace, type Tracer } from "@opentelemetry/api";
 import { logs, SeverityNumber } from "@opentelemetry/api-logs";
 import { getNodeAutoInstrumentations } from "@opentelemetry/auto-instrumentations-node";
@@ -28,8 +34,10 @@ import {
 const SERVICE_NAME = process.env.OTEL_SERVICE_NAME ?? "kakaw-agent";
 const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim();
 
+let sdk: NodeSDK | undefined;
+
 if (endpoint) {
-  const sdk = new NodeSDK({
+  sdk = new NodeSDK({
     resource: resourceFromAttributes({
       [ATTR_SERVICE_NAME]: SERVICE_NAME,
       [ATTR_SERVICE_VERSION]: process.env.npm_package_version ?? "0.1.0",
@@ -50,17 +58,55 @@ if (endpoint) {
   sdk.start();
   new HostMetrics({ meterProvider: metrics.getMeterProvider() }).start();
 
+  // eslint-disable-next-line no-console
+  console.log(`[telemetry] OpenTelemetry started → ${endpoint}`);
+}
+
+// ── Latitude: LLM tracing ────────────────────────────────────────────────────
+// Latitude is OpenTelemetry-based, so it composes with the setup above instead
+// of replacing it: constructed after `sdk.start()`, it detects the global
+// tracer provider and attaches its own span processor alongside the OTLP one.
+// Every span keeps flowing to Alloy unchanged; Latitude additionally receives
+// the LLM-relevant subset (its smart filter drops http/pg/dns spans).
+//
+// The LangChain instrumentation is what actually produces `gen_ai.*` spans —
+// auto-instrumentations-node does not cover LangChain, so without it there are
+// no model calls to trace. It patches the callback manager module directly, so
+// it does not depend on this file being preloaded before `@langchain/*`.
+//
+// NOTE: this file is preloaded via `node --import` *before* server.ts, which is
+// where Infisical secrets are fetched. LATITUDE_API_KEY is therefore read from
+// the real process environment (container env / .env in dev), never Infisical —
+// same as the OTEL_* vars above.
+const latitudeApiKey = process.env.LATITUDE_API_KEY?.trim();
+const latitudeProject = process.env.LATITUDE_PROJECT_SLUG?.trim();
+
+/** Undefined when LATITUDE_API_KEY is unset — LLM tracing stays off. */
+export const latitude = latitudeApiKey
+  ? new Latitude({
+      apiKey: latitudeApiKey,
+      ...(latitudeProject ? { project: latitudeProject } : {}),
+      instrumentations: [createLangChainInstrumentation(CallbackManagerModule)],
+    })
+  : undefined;
+
+if (latitude) {
+  // eslint-disable-next-line no-console
+  console.log(
+    `[telemetry] Latitude LLM tracing started → project=${latitudeProject ?? "(default)"}`,
+  );
+}
+
+if (sdk || latitude) {
   const shutdown = () => {
-    void sdk
-      .shutdown()
-      .catch(() => undefined)
-      .finally(() => process.exit(0));
+    // Spans export on a batch interval; flush both pipelines before exiting or
+    // the last run's spans are dropped.
+    void Promise.allSettled([sdk?.shutdown(), latitude?.shutdown()]).finally(
+      () => process.exit(0),
+    );
   };
   process.once("SIGTERM", shutdown);
   process.once("SIGINT", shutdown);
-
-  // eslint-disable-next-line no-console
-  console.log(`[telemetry] OpenTelemetry started → ${endpoint}`);
 }
 
 // ── Instruments shared by the manual pipeline instrumentation ────────────────

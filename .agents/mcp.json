@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "latitude": {
+      "type": "http",
+      "url": "https://api.latitude.so/v1/mcp"
+    }
+  }
+}

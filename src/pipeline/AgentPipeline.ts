@@ -1,5 +1,7 @@
 import { StateGraph } from "@langchain/langgraph";
+import { capture } from "@latitude-data/telemetry";
 import { setCachedPlan } from "../llm/cache.js";
+import { latitude } from "../telemetry.js";
 import type { GraphStateValue } from "../llm/state.js";
 import { GraphState } from "../llm/state.js";
 import type { AgentRunRequest, AgentStreamEvent, TraceAnalyticsOutcome, VisualizationOutcome } from "../types.js";
@@ -77,11 +79,57 @@ export class AgentPipeline {
     return events;
   }
 
+  /**
+   * Latitude capture boundary: one turn = one trace. Every layer, every model
+   * call, and the streamed answer all run inside this scope, so the LLM spans
+   * the LangChain instrumentation emits are grouped under a single root and
+   * carry the user/conversation context.
+   *
+   * Skipped when Latitude is not configured, so the local/Alloy-only setup does
+   * not gain a second root span shadowing PipelineLogger's `agent.run`.
+   */
   private async runGraph(
     request: AgentRunRequest,
     emitter: PipelineEmitter,
     logger: PipelineLogger,
   ): Promise<void> {
+    if (!latitude) {
+      await this.executeGraph(request, emitter, logger);
+      return;
+    }
+
+    // `capture.start`/`end` rather than the callback form: a failed run is
+    // handled inside executeGraph and never thrown, so the callback form would
+    // report every turn as successful. The returned failure is fed to `end()`
+    // so the trace is marked errored in Latitude.
+    const scope = capture.start("agent.turn", {
+      userId: request.userId,
+      sessionId: request.conversationId,
+      tags: ["agent-run", request.llm.provider, request.database.provider],
+      metadata: {
+        requestId: request.requestId,
+        messageId: request.messageId,
+        model: request.llm.model,
+        sourceId: request.database.sourceId,
+        historyLength: request.history.length,
+      },
+    });
+
+    try {
+      const failure = await this.executeGraph(request, emitter, logger);
+      scope.end(failure ?? undefined);
+    } catch (error) {
+      scope.end(error);
+      throw error;
+    }
+  }
+
+  /** Resolves to the run's failure, or null when the turn succeeded. */
+  private async executeGraph(
+    request: AgentRunRequest,
+    emitter: PipelineEmitter,
+    logger: PipelineLogger,
+  ): Promise<Error | null> {
     logger.logRunStart();
     const runStartMs = Date.now();
 
@@ -138,6 +186,14 @@ export class AgentPipeline {
       }
 
       logger.logRunEnd(finalState as GraphStateValue, Date.now() - runStartMs);
+
+      // A run that ends without an answer emitted `message_failed` above; it is
+      // a failed turn even though nothing was thrown.
+      if (finalState.errorMessage) return new Error(finalState.errorMessage);
+      if (!finalState.answer) {
+        return new Error("Agent runtime did not produce an answer.");
+      }
+      return null;
     } catch (error) {
       const message = error instanceof Error ? error.message.trim() || "Unexpected agent failure." : "Unexpected agent failure.";
       logger.logRunError(message, Date.now() - runStartMs);
@@ -154,6 +210,7 @@ export class AgentPipeline {
           },
         },
       });
+      return error instanceof Error ? error : new Error(message);
     } finally {
       emitter.finish();
     }

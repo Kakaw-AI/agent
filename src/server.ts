@@ -5,7 +5,7 @@ import { verifyIncomingSignature } from "./auth.js";
 import { loadInfisicalSecrets } from "./config/infisical.js";
 import { syncDatabase } from './database/knowledge.js';
 import { streamAgent } from './llm/runner.js';
-import { emitLog } from "./telemetry.js";
+import { emitLog, latitude } from "./telemetry.js";
 import type { AgentRunRequest, AgentSyncRequest } from "./types.js";
 
 
@@ -66,6 +66,10 @@ const server = createServer(async (request, response) => {
 async function main() {
   // Load secrets (AGENT_SHARED_SECRET, etc.) before accepting requests.
   await loadInfisicalSecrets();
+
+  // Latitude's exporter finishes wiring up asynchronously; waiting here means
+  // the very first request is traced too, not just the ones after warm-up.
+  await latitude?.ready;
 
   const host = process.env.HOST?.trim() || "0.0.0.0";
   const port = Number(process.env.PORT ?? 8000);
