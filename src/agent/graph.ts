@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { awaitAllCallbacks } from "@langchain/core/callbacks/promises";
 import { capture } from "@latitude-data/telemetry";
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { latitude } from "../telemetry.js";
@@ -83,15 +85,56 @@ function failureEvent(request: AgentRunRequest, error: unknown): AgentStreamEven
   };
 }
 
+const langsmithOn = () => (process.env.LANGSMITH_TRACING ?? process.env.LANGCHAIN_TRACING_V2) === "true";
+
+/**
+ * A run that gives up still ends normally, so LangSmith lists it as a success.
+ * Feedback on the root run makes failures filterable (outcome = 0).
+ */
+function recordOutcome(runId: string, error: string | null) {
+  const apiKey = process.env.LANGSMITH_API_KEY ?? process.env.LANGCHAIN_API_KEY;
+  if (!langsmithOn() || !apiKey) return;
+  const endpoint = process.env.LANGSMITH_ENDPOINT ?? "https://api.smith.langchain.com";
+  void (async () => {
+    await awaitAllCallbacks(); // the run itself has to reach LangSmith first
+    await fetch(`${endpoint}/api/v1/feedback`, {
+      method: "POST",
+      headers: { "x-api-key": apiKey, "content-type": "application/json" },
+      body: JSON.stringify({ run_id: runId, key: "outcome", score: error ? 0 : 1, comment: error ?? undefined }),
+    });
+  })().catch(() => {});
+}
+
 async function* run(request: AgentRunRequest, logger: RunLogger, signal?: AbortSignal): AsyncGenerator<AgentStreamEvent, Error | null> {
   const started = Date.now();
   logger.logRunStart();
+  const runId = randomUUID();
 
   let final: State | null = null;
   try {
     const stream = await agentGraph.stream(
       {},
-      { context: { request, logger }, streamMode: ["custom", "values"], recursionLimit: RECURSION_LIMIT, signal },
+      {
+        context: { request, logger },
+        streamMode: ["custom", "values"],
+        recursionLimit: RECURSION_LIMIT,
+        signal,
+        // Searchable in LangSmith; the graph input itself is empty.
+        runId,
+        tags: [request.llm.provider, request.llm.model, request.database.provider],
+        metadata: {
+          question: request.message,
+          conversation_id: request.conversationId,
+          message_id: request.messageId,
+          request_id: request.requestId,
+          user_id: request.userId,
+          source_id: request.database.sourceId,
+          provider: request.llm.provider,
+          model: request.llm.model,
+          thinking: request.llm.disableThinking ? "off" : "on",
+          history_length: request.history.length,
+        },
+      },
     );
     for await (const [mode, chunk] of stream as AsyncIterable<[string, unknown]>) {
       if (mode === "custom") {
@@ -108,11 +151,13 @@ async function* run(request: AgentRunRequest, logger: RunLogger, signal?: AbortS
     }
     const message = error instanceof Error ? error.message : String(error);
     logger.logRunError(message, Date.now() - started);
+    recordOutcome(runId, message);
     yield failureEvent(request, error);
     return error instanceof Error ? error : new Error(message);
   }
 
   const failed = !final || !!final.errorMessage || !final.answer;
+  recordOutcome(runId, failed ? final?.errorMessage || "No answer produced." : null);
   logger.logRunEnd(failed ? "failed" : final!.clarification ? "clarification" : "answered", Date.now() - started);
   return failed ? new Error(final?.errorMessage ?? "Agent runtime did not produce an answer.") : null;
 }
