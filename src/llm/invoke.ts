@@ -68,7 +68,12 @@ export async function invokeStructured<T>(
   // With includeRaw a reply that does not fit the schema comes back as null
   // instead of throwing; treat it as the failure it is.
   if (response.parsed === null || response.parsed === undefined) {
-    throw new Error("The model's reply did not match the expected format.");
+    // The raw reply is the only clue to why parsing failed (prose, empty, a
+    // tool call with bad args); keep a short copy in the error for traces/logs.
+    const raw = flattenContentRaw(response.raw.content).trim().slice(0, 300);
+    const calls = JSON.stringify(response.raw.tool_calls ?? []).slice(0, 300);
+    console.warn(`[llm] unparsable structured reply from ${input.llm.model}: content=${JSON.stringify(raw)} tool_calls=${calls}`);
+    throw new Error(`The model's reply did not match the expected format. Got: ${raw || calls}`);
   }
   return { value: response.parsed, tokenUsage };
 }
