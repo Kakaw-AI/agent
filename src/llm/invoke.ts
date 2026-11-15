@@ -1,7 +1,7 @@
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { AIMessage, type AIMessageChunk, HumanMessage } from "@langchain/core/messages";
 import type { ZodType } from "zod";
-import { LLM_TIMEOUT_MS } from "../config.js";
+import { LLM_TIMEOUT_MS, LOCAL_LLM_TIMEOUT_MS } from "../config.js";
 import { LLMTimeoutException } from "../exceptions/LLMTimeoutException.js";
 import type { TokenUsage } from "../types.js";
 import { flattenContentRaw } from "../utils/text.js";
@@ -9,16 +9,21 @@ import { buildSystemMessage, createLangChainModel, extractTokenUsage } from "./l
 import { toLangChainMessages } from "./messages.js";
 import type { InvokeResult, LlmCall } from "./types.js";
 
+const isLocal = (llm: LlmCall["llm"]) => llm.provider === "ollama" || llm.provider === "lm-studio";
+const timeoutMs = (llm: LlmCall["llm"]) => (isLocal(llm) ? LOCAL_LLM_TIMEOUT_MS : LLM_TIMEOUT_MS);
+
 function toMessages(input: LlmCall) {
+  // "/no_think" is the Qwen-family soft switch that LM Studio and Ollama pass through.
+  const suffix = input.llm.disableThinking && isLocal(input.llm) ? " /no_think" : "";
   return [
     buildSystemMessage(input.llm.provider, input.systemPrompt),
     ...toLangChainMessages(input.history ?? []),
-    new HumanMessage(input.userPrompt),
+    new HumanMessage(input.userPrompt + suffix),
   ];
 }
 
-function timeoutError(provider: string) {
-  return new LLMTimeoutException(`LLM call timed out after ${LLM_TIMEOUT_MS}ms`, provider);
+function timeoutError(llm: LlmCall["llm"]) {
+  return new LLMTimeoutException(`LLM call timed out after ${timeoutMs(llm)}ms`, llm.provider);
 }
 
 /**
@@ -47,14 +52,14 @@ export async function invokeStructured<T>(
     { includeRaw: true },
   );
 
-  const timeout = AbortSignal.timeout(LLM_TIMEOUT_MS);
+  const timeout = AbortSignal.timeout(timeoutMs(input.llm));
   const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
 
   let response: { raw: AIMessage; parsed: T | null };
   try {
     response = (await structured.invoke(toMessages(input), { signal })) as typeof response;
   } catch (error) {
-    if (timeout.aborted) throw timeoutError(input.llm.provider);
+    if (timeout.aborted) throw timeoutError(input.llm);
     throw error;
   }
 
@@ -85,7 +90,7 @@ export async function invokeStream(
   });
 
   const firstChunk = new AbortController();
-  const timer = setTimeout(() => firstChunk.abort(), LLM_TIMEOUT_MS);
+  const timer = setTimeout(() => firstChunk.abort(), timeoutMs(input.llm));
   const signal = input.signal ? AbortSignal.any([input.signal, firstChunk.signal]) : firstChunk.signal;
 
   let content = "";
@@ -103,7 +108,7 @@ export async function invokeStream(
       }
     }
   } catch (error) {
-    if (firstChunk.signal.aborted) throw timeoutError(input.llm.provider);
+    if (firstChunk.signal.aborted) throw timeoutError(input.llm);
     throw error;
   } finally {
     clearTimeout(timer);

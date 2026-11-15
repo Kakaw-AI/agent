@@ -112,6 +112,8 @@ export type AgentLlmRuntime = {
   apiKey: string;
   baseUrl?: string;
   headers?: Record<string, string>;
+  /** User turned thinking off in the chat bar; honoured for local models only. */
+  disableThinking?: boolean;
 };
 
 export type AgentRunRequest = {

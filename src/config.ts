@@ -1,6 +1,8 @@
 export const MAX_SAMPLE_ROWS = 3;
 export const MAX_RESULT_ROWS = 200;
 export const LLM_TIMEOUT_MS = readIntEnv("LLM_TIMEOUT_MS", 90 * 1000);
+/** Local models (Ollama, LM Studio) run at a few tokens/s on consumer hardware. */
+export const LOCAL_LLM_TIMEOUT_MS = readIntEnv("LOCAL_LLM_TIMEOUT_MS", 10 * 60 * 1000);
 
 /** Hard ceiling on one generated query against a user's database. */
 export const QUERY_TIMEOUT_MS = readIntEnv("QUERY_TIMEOUT_MS", 30 * 1000);
