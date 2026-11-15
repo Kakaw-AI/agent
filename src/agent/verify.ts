@@ -31,7 +31,6 @@ export async function verify(state: State, config: NodeConfig) {
         rowCount: state.rowCount,
       }),
       temperature: 0,
-      maxTokens: 1024,
       signal,
       ...hooks,
       schema: VerifySchema,

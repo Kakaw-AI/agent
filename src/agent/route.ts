@@ -54,7 +54,6 @@ export async function route(_state: State, config: NodeConfig) {
         llm: request.llm,
         ...new RoutePromptBuilder().build({ history: request.history, message }),
         temperature: 0,
-        maxTokens: 1024,
         signal,
         ...hooks,
         schema: RouteSchema,

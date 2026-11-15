@@ -19,26 +19,26 @@ type ChatModel = ChatOpenAI | ChatAnthropic | ChatGoogleGenerativeAI;
 const MODEL_CACHE_MAX = 16;
 const modelCache = new Map<string, ChatModel>();
 
-function modelCacheKey(llm: LLMRuntime, temperature: number, maxTokens: number): string {
+function modelCacheKey(llm: LLMRuntime, temperature: number, maxTokens?: number): string {
   return [
     llm.provider,
     llm.model,
     temperature,
-    maxTokens,
+    maxTokens ?? "",
     llm.baseUrl ?? "",
     llm.apiKey ?? "",
   ].join("\0");
 }
 
 /**
- * `maxTokens` caps one reply. A model that loops (seen with local models)
- * otherwise runs until the timeout, and on a hosted provider the user pays for
- * every token of it.
+ * No reply cap by default: a low one cut off long SQL replies mid-JSON. The
+ * timeout still stops a looping model. Anthropic is the exception, its API
+ * requires `max_tokens`, so it gets the largest value every current model takes.
  */
 export function createLangChainModel(
   llm: LLMRuntime,
   temperature: number,
-  maxTokens = 4096,
+  maxTokens?: number,
 ): ChatModel {
   const key = modelCacheKey(llm, temperature, maxTokens);
   const cached = modelCache.get(key);
@@ -65,7 +65,7 @@ export function createLangChainModel(
 function buildLangChainModel(
   llm: LLMRuntime,
   temperature: number,
-  maxTokens: number,
+  maxTokens?: number,
 ): ChatModel {
   switch (llm.provider) {
     case "openai":
@@ -76,7 +76,7 @@ function buildLangChainModel(
         model: llm.model,
         apiKey: llm.apiKey || "empty",
         temperature,
-        maxTokens,
+        ...(maxTokens ? { maxTokens } : {}),
         configuration: {
           baseURL:
             llm.provider === "openrouter"
@@ -93,14 +93,14 @@ function buildLangChainModel(
         model: llm.model,
         apiKey: llm.apiKey,
         temperature,
-        maxTokens,
+        maxTokens: maxTokens ?? 64000,
       });
     case "google":
       return new ChatGoogleGenerativeAI({
         model: llm.model,
         apiKey: llm.apiKey,
         temperature,
-        maxOutputTokens: maxTokens,
+        ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
       });
   }
 }
