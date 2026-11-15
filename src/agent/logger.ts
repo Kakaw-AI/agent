@@ -1,6 +1,5 @@
 import { context, SpanStatusCode, trace, type Span } from "@opentelemetry/api";
 import type { AgentRunRequest } from "../types.js";
-import type { GraphStateValue } from "../llm/state.js";
 import type { LlmCallHook, LlmResponseHook } from "../llm/types.js";
 import {
   emitLog,
@@ -62,7 +61,8 @@ type LayerStats = {
   outTokens: number;
 };
 
-export class PipelineLogger {
+/** Structured logs, metrics and spans for one agent run; one span per graph node. */
+export class RunLogger {
   private request: AgentRunRequest;
   private layerStats = new Map<string, LayerStats>();
   private runStartMs = 0;
@@ -124,16 +124,7 @@ export class PipelineLogger {
     }
   }
 
-  logLayerSkipped(layerName: string): void {
-    this.runSpan?.addEvent("layer_skipped", { layer: layerName });
-    if (IS_DEV) {
-      write(`\n  ${GRAY}▶ ${layerName}  (skipped)${R}`);
-    } else {
-      writeJson({ event: "layer_skipped", layer: layerName });
-    }
-  }
-
-  logLayerCompleted(layerName: string, result: Partial<GraphStateValue>, durationMs: number): void {
+  logLayerCompleted(layerName: string, durationMs: number): void {
     const stats = this.layerStats.get(layerName) ?? { startMs: 0, inTokens: 0, outTokens: 0 };
     this.totalInTokens += stats.inTokens;
     this.totalOutTokens += stats.outTokens;
@@ -188,8 +179,9 @@ export class PipelineLogger {
     }
   }
 
-  logRunEnd(finalState: Partial<GraphStateValue>, durationMs: number): void {
-    const outcome = (finalState as any).analyticsOutcome ?? "unknown";
+  // Previously read `analyticsOutcome` off the graph state, which never had
+  // that field, so every run was counted as "unknown".
+  logRunEnd(outcome: string, durationMs: number): void {
     runCounter.add(1, { outcome: String(outcome) });
     if (this.runSpan) {
       this.runSpan.setAttributes({

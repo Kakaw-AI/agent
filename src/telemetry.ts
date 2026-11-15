@@ -97,16 +97,13 @@ if (latitude) {
   );
 }
 
-if (sdk || latitude) {
-  const shutdown = () => {
-    // Spans export on a batch interval; flush both pipelines before exiting or
-    // the last run's spans are dropped.
-    void Promise.allSettled([sdk?.shutdown(), latitude?.shutdown()]).finally(
-      () => process.exit(0),
-    );
-  };
-  process.once("SIGTERM", shutdown);
-  process.once("SIGINT", shutdown);
+/**
+ * Spans export on a batch interval; flush both pipelines before exiting or the
+ * last run's spans are dropped. Called from server.ts once the HTTP server has
+ * drained — exiting from here would cut in-flight requests short.
+ */
+export async function shutdownTelemetry(): Promise<void> {
+  await Promise.allSettled([sdk?.shutdown(), latitude?.shutdown()]);
 }
 
 // ── Instruments shared by the manual pipeline instrumentation ────────────────

@@ -1,4 +1,3 @@
-import type { ZodType } from "zod";
 import type { AgentHistoryMessage, AgentLlmRuntime, TokenUsage } from "../types.js";
 
 export type LlmCallHook = (input: {
@@ -20,33 +19,16 @@ export type InvokeResult = {
   tokenUsage: TokenUsage | null;
 };
 
-export type InvokeTextInput = {
+export type LlmCall = {
   llm: AgentLlmRuntime;
   systemPrompt: string;
   userPrompt: string;
   history?: AgentHistoryMessage[];
   temperature?: number;
+  /** Aborts the provider request, e.g. when the client disconnects. */
+  signal?: AbortSignal;
+  /** Upper bound on the reply; generous, since reasoning models count their thinking. */
+  maxTokens?: number;
   onLlmCall?: LlmCallHook;
   onLlmResponse?: LlmResponseHook;
 };
-
-export type InvokeTextStreamInput = InvokeTextInput & {
-  /** Called for every non-empty chunk as it arrives. */
-  onDelta: (delta: string) => void;
-};
-
-export type LLMJsonInput<T> = {
-  llm: AgentLlmRuntime;
-  systemPrompt: string;
-  userPrompt: string;
-  history?: AgentHistoryMessage[];
-  temperature?: number;
-  onLlmCall?: LlmCallHook;
-  onLlmResponse?: LlmResponseHook;
-  schema: ZodType<T>;
-};
-
-export interface InvokeJsonResponse<T> {
-  value: T;
-  tokenUsage: TokenUsage | null;
-}

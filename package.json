@@ -12,12 +12,11 @@
   },
   "dependencies": {
     "@infisical/sdk": "^5.0.2",
-    "@langchain/anthropic": "^1.4.0",
-    "@langchain/core": "^1.1.48",
-    "@langchain/google-genai": "^2.1.31",
-    "@langchain/langgraph": "^0.2.74",
-    "@langchain/mcp-adapters": "^1.1.3",
-    "@langchain/openai": "^1.4.2",
+    "@langchain/anthropic": "^1.6.5",
+    "@langchain/core": "^1.4.1",
+    "@langchain/google-genai": "^2.3.6",
+    "@langchain/langgraph": "^1.7.4",
+    "@langchain/openai": "^1.8.4",
     "@latitude-data/telemetry": "^4.0.0",
     "@opentelemetry/api": "^1.9.1",
     "@opentelemetry/api-logs": "^0.218.0",
@@ -35,7 +34,7 @@
     "better-sqlite3": "^12.8.0",
     "dotenv": "^17.4.0",
     "pg": "^8.16.3",
-    "zod": "^3.24.1"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

@@ -101,6 +101,8 @@ export type AgentHistoryMessage = {
   content: string;
   rows?: Array<Record<string, unknown>>;
   columns?: string[];
+  /** The SQL behind an assistant turn, so follow-ups build on the real query. */
+  sql?: string;
 };
 
 export type AgentLlmRuntime = {
@@ -213,7 +215,9 @@ export type TraceAnalyticsOutcome =
   | "no_rows"
   | "narrowed"
   | "chart_rendered"
-  | "completed_text";
+  | "completed_text"
+  /** The agent asked the user to choose between readings instead of guessing. */
+  | "clarification";
 
 export type VisualizationChartSpecBase = {
   kind: "bar" | "line" | "pie" | "scatter" | "histogram" | "network";
@@ -284,6 +288,11 @@ export type AgentStreamEvent =
       visualizationOutcome?: VisualizationOutcome | null;
       analyticsOutcome?: TraceAnalyticsOutcome;
       rowCount?: number;
+      /**
+       * The question actually answered. Differs from the user's text for a
+       * follow-up, and is what query memory should be keyed on.
+       */
+      standaloneQuestion?: string;
     };
   }
   | {

@@ -5,7 +5,6 @@ export class SqliteSqlPromptBuilder extends BaseSqlPromptBuilder {
     return [
       "--- ROLE & OUTPUT FORMAT ---",
       "You are an expert SQL analyst writing highly optimized queries for SQLite.",
-      `You MUST return a valid JSON object strictly matching this schema: {"sql": "string", "rationale": "string"}.`,
       "Do NOT wrap the JSON output in markdown code blocks (e.g., ```json). Return raw JSON only.",
 
       "--- SECURITY & EXECUTION CONSTRAINTS ---",

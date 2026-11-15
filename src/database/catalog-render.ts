@@ -18,11 +18,38 @@ import type { DatabaseCatalogTable } from "../types.js";
  */
 const CHARS_PER_TOKEN = 3.6;
 
+const NUMERIC_TYPE = /int|numeric|decimal|real|double|float|serial|money|number|bool/i;
+const MAX_SAMPLE_CHARS = 40;
+
+/**
+ * Up to three stored values for a text or date column, e.g. `e.g. 'Delivered', 'Shipped'`.
+ *
+ * Without them the model guesses filter values from the question: it writes
+ * `status = 'cancelled'` when the data says 'Cancelled', and the query runs
+ * fine and returns nothing. Numbers are skipped because a sample of them says
+ * little, and so are redacted or binary values.
+ */
+function renderSampleValues(column: DatabaseCatalogTable["columns"][number]): string {
+  if (column.isPrimaryKey || NUMERIC_TYPE.test(column.dataType) || !column.sampleValues) {
+    return "";
+  }
+  const seen = new Set<string>();
+  for (const sample of column.sampleValues) {
+    if (sample === null || sample === undefined || typeof sample === "object") continue;
+    const text = String(sample);
+    if (!text.trim() || text === "[redacted]" || text.startsWith("[binary:")) continue;
+    seen.add(text.length > MAX_SAMPLE_CHARS ? `${text.slice(0, MAX_SAMPLE_CHARS)}...` : text);
+    if (seen.size === 3) break;
+  }
+  if (seen.size === 0) return "";
+  return `, e.g. ${[...seen].map((text) => `'${text.replace(/'/g, "''")}'`).join(", ")}`;
+}
+
 export function renderCatalogLine(table: DatabaseCatalogTable): string {
   const columns = table.columns
     .map(
       (column) =>
-        `${column.name} (${column.dataType}${column.isPrimaryKey ? ", PK" : ""}${column.isNullable ? "" : ", NOT NULL"})`,
+        `${column.name} (${column.dataType}${column.isPrimaryKey ? ", PK" : ""}${column.isNullable ? "" : ", NOT NULL"}${renderSampleValues(column)})`,
     )
     .join(", ");
 

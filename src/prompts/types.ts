@@ -15,8 +15,8 @@ export type ChartPlanPromptInput = {
 
 export type SuggestionsPromptInput = {
   question: string;
-  answer: string;
   columns: string[];
+  rows: Array<Record<string, unknown>>;
   rowCount: number;
   tableNames: string;
   summary: string;

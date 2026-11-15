@@ -4,7 +4,6 @@ export class PostgresSqlPromptBuilder extends BaseSqlPromptBuilder {
   protected buildDialectInstructions(): string[] {
     return [
       "You generate SQL for analytics over PostgreSQL.",
-      `Return JSON with {"sql": string, "rationale": string}.`,
       "Use one read-only statement only.",
       "Never produce INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, TRUNCATE, or other write/admin commands.",
       "Use schema-qualified table names when the catalog provides a schema name (e.g. public.orders).",

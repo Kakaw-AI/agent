@@ -1,7 +1,6 @@
 import type { AgentHistoryMessage } from "../../types.js";
 import { normalizeQuestion } from "../../utils/text.js";
-import { ANALYTICAL_HINT_PATTERNS, SHORT_VISUALIZATION_PATTERNS, SMALL_TALK_PATTERNS } from "./patterns.js";
-import { isVisualizationKeyword, tokenizeQuestion } from "./text.js";
+import { ANALYTICAL_HINT_PATTERNS, isSmallTalk } from "./patterns.js";
 import { buildVisualizationRequestFromQuestion } from "./visualization-request.js";
 
 export function extractLastAnalyzableAnalyticalTurn(history: AgentHistoryMessage[]) {
@@ -17,11 +16,10 @@ export function extractLastAnalyzableAnalyticalTurn(history: AgentHistoryMessage
       continue;
     }
 
-    const normalized = normalizeQuestion(message.content);
-    if (SMALL_TALK_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    if (isSmallTalk(message.content)) {
       continue;
     }
-    if (!ANALYTICAL_HINT_PATTERNS.some((pattern) => pattern.test(normalized))) {
+    if (!ANALYTICAL_HINT_PATTERNS.some((pattern) => pattern.test(normalizeQuestion(message.content)))) {
       continue;
     }
 
@@ -44,23 +42,22 @@ export function extractRowsFromHistory(history: AgentHistoryMessage[]) {
   for (let i = history.length - 1; i >= 0; i -= 1) {
     const msg = history[i];
     if (msg.role === "assistant" && msg.rows && msg.rows.length > 0 && msg.columns) {
-      return { rows: msg.rows, columns: msg.columns };
+      return { rows: msg.rows, columns: msg.columns, sql: msg.sql };
     }
   }
   return null;
 }
 
-export function isShortVisualizationFollowup(question: string, history: AgentHistoryMessage[]) {
-  const normalized = normalizeQuestion(question);
-  const tokens = tokenizeQuestion(question);
-
-  if (tokens.length === 0 || tokens.length > 4) {
-    return false;
+/**
+ * The previous assistant turn asked the user something and ran no query. The
+ * newest message is the reply, so asking again would loop.
+ */
+export function previousTurnAskedUser(history: AgentHistoryMessage[]): boolean {
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    const message = history[i];
+    if (message.role === "assistant") {
+      return !message.sql && message.content.trim().endsWith("?");
+    }
   }
-
-  if (!extractLastAnalyzableAnalyticalTurn(history)) {
-    return false;
-  }
-
-  return tokens.some((token) => isVisualizationKeyword(token)) || SHORT_VISUALIZATION_PATTERNS.some((pattern) => pattern.test(normalized));
+  return false;
 }

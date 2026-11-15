@@ -3,6 +3,12 @@ import type { DatabaseCatalogTable, DatabaseKnowledgeRuntime } from "../types.js
 import { getRequiredVisualizationFields } from "../graph/visualization.js";
 import type { SqlPromptBuildInput, SqlPromptOptions } from "../graph/types.js";
 
+const OUTPUT_INSTRUCTIONS = [
+  "Return JSON with these fields: needsClarification (boolean), clarifyingQuestion (string), options (list of strings), sql (string), rationale (string).",
+  "Ask for clarification only when the question cannot be answered without a choice the user has to make, and neither the conversation nor the catalog settles it. Example: 'who are our best customers?' when best could mean most spent, most orders or most recent. Then set needsClarification to true, write one short clarifyingQuestion, give 2 to 4 short options phrased as complete questions the user could send, and leave sql empty.",
+  "Otherwise set needsClarification to false, leave clarifyingQuestion empty and options empty, and write the SQL. Prefer answering: when one reading is clearly the usual one, use it and state the assumption in the rationale.",
+];
+
 export abstract class BaseSqlPromptBuilder {
   protected abstract buildDialectInstructions(): string[];
 
@@ -53,6 +59,9 @@ export abstract class BaseSqlPromptBuilder {
       this.buildVisualizationDimensionInstruction(options),
       this.buildMetricInstruction(options),
       "Every aggregate metric must have a readable user-facing alias such as model_count, total_revenue, or average_rating.",
+      "When you filter on a text column, use a value exactly as it appears in the catalog examples (same spelling and case). If the example values do not include the one you need, match case-insensitively.",
+      "Earlier turns of the conversation include the SQL they ran. For a follow-up, start from that SQL and change only what the new question changes.",
+      ...OUTPUT_INSTRUCTIONS,
       `Knowledge summary: ${knowledge.summary || "No summary available."}`,
       "Catalog:",
       ...schemaLines,
@@ -74,7 +83,7 @@ export abstract class BaseSqlPromptBuilder {
   ): string {
     return [
       this.buildInitialPrompt(knowledge, options),
-      "The prior SQL failed. Repair it and return JSON with only the replacement SQL. The failing SQL and the database error appear in the user message.",
+      "The prior SQL was wrong. Write a corrected query. The failing SQL and what was wrong with it appear in the user message. Do not ask for clarification now: set needsClarification to false and return SQL.",
     ].join("\n");
   }
 
