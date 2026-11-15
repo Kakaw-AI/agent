@@ -2,6 +2,9 @@ export const MAX_SAMPLE_ROWS = 3;
 export const MAX_RESULT_ROWS = 200;
 export const LLM_TIMEOUT_MS = readIntEnv("LLM_TIMEOUT_MS", 90 * 1000);
 
+/** Hard ceiling on one generated query against a user's database. */
+export const QUERY_TIMEOUT_MS = readIntEnv("QUERY_TIMEOUT_MS", 30 * 1000);
+
 /**
  * Rows inlined into the answer prompt. The model is summarizing, not
  * transcribing — the user already sees the full table — so the whole result set

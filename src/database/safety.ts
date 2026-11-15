@@ -1,5 +1,11 @@
 import { SQLException } from "../exceptions/SQLException.js";
 
+/**
+ * A cheap first filter that gives the model a clear error to repair against.
+ * It is not the security boundary: keyword matching cannot see side-effecting
+ * functions. Enforcement is the read-only transaction (Postgres) and the
+ * read-only file handle (SQLite) in query.ts.
+ */
 export function assertReadOnlySql(sql: string) {
   const trimmed = sql.trim().replace(/;+$/, "");
   const upper = trimmed.toUpperCase();
@@ -21,7 +27,7 @@ export function assertReadOnlySql(sql: string) {
   }
 
   const blockedRegex =
-    /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|ATTACH|DETACH|VACUUM)\b/i;
+    /\b(INSERT|UPDATE|DELETE|MERGE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|ATTACH|DETACH|VACUUM)\b/i;
 
   if (blockedRegex.test(trimmed)) {
     throw new SQLException("Unsafe SQL was blocked before execution.", trimmed);

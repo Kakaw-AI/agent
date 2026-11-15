@@ -1,15 +1,26 @@
 import { Client } from "pg";
-import { MAX_SAMPLE_ROWS } from "../config.js";
+import { MAX_SAMPLE_ROWS, QUERY_TIMEOUT_MS } from "../config.js";
+import { guardedSocket } from "../net/public-host.js";
 import type { AgentDatabaseRuntime, DatabaseCatalogTable } from "../types.js";
 import { collectSampleValues, extractPostgresIndexColumns, normalizeName, sanitizeRow } from "./sanitize.js";
 
 export async function introspectPostgres(
   database: AgentDatabaseRuntime,
 ): Promise<DatabaseCatalogTable[]> {
-  const client = new Client({ connectionString: database.connectionString });
+  const client = new Client({
+    connectionString: database.connectionString,
+    connectionTimeoutMillis: 10_000,
+    stream: guardedSocket,
+  });
   await client.connect();
 
   try {
+    // Introspection only reads. The transaction makes the database enforce
+    // that, and bounds each statement (the row counts and random samples below
+    // can be slow on large tables).
+    await client.query("BEGIN TRANSACTION READ ONLY");
+    await client.query(`SET LOCAL statement_timeout = ${QUERY_TIMEOUT_MS}`);
+
     const tableRows = await client.query<{
       table_schema: string;
       table_name: string;

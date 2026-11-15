@@ -1,15 +1,28 @@
-import { mkdir, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rename, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SQLException } from "../exceptions/SQLException.js";
 import type { AgentDatabaseRuntime } from "../types.js";
 
 const CACHE_DIR = join(tmpdir(), "kakaw-sqlite");
+const CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** Removes cached files nobody has queried in a week, so the disk cannot fill. */
+async function evictStaleFiles(): Promise<void> {
+  const cutoff = Date.now() - CACHE_MAX_AGE_MS;
+  for (const name of await readdir(CACHE_DIR)) {
+    const path = join(CACHE_DIR, name);
+    const stats = await stat(path).catch(() => null);
+    if (stats && stats.mtimeMs < cutoff) {
+      await unlink(path).catch(() => undefined);
+    }
+  }
+}
 
 // Each upload lives at a unique, immutable R2 object key, so the key alone is a
 // safe cache identity — a new upload produces a new key and therefore a new
 // cache file.
-function cacheFilePath(objectKey: string): string {
+export function cacheFilePath(objectKey: string): string {
   const safe = Buffer.from(objectKey).toString("hex");
   return join(CACHE_DIR, `${safe}.sqlite`);
 }
@@ -37,6 +50,9 @@ export async function materializeSqlite(
 
   const target = cacheFilePath(database.sqliteObjectKey);
   if (await isNonEmptyFile(target)) {
+    // Mark the file as recently used; eviction goes by mtime.
+    const now = new Date();
+    await utimes(target, now, now).catch(() => undefined);
     return target;
   }
 
@@ -45,6 +61,7 @@ export async function materializeSqlite(
   }
 
   await mkdir(CACHE_DIR, { recursive: true });
+  await evictStaleFiles().catch(() => undefined);
 
   const response = await fetch(database.sqliteDownloadUrl);
   if (!response.ok) {

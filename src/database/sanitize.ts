@@ -4,7 +4,7 @@ import {
   normalizeIdentifier,
 } from "./identifier-match.js";
 
-const SECRET_FIELD_PATTERN = /(password|secret|token|key|credential|auth|session)/i;
+export const SECRET_FIELD_PATTERN =/(password|secret|token|key|credential|auth|session)/i;
 
 export function collectSampleValues(rows: Array<Record<string, unknown>>, columnName: string) {
   return rows
@@ -27,7 +27,9 @@ function sanitizeValue(key: string, value: unknown): unknown {
   if (SECRET_FIELD_PATTERN.test(key)) {
     return "[redacted]";
   }
-  if (Buffer.isBuffer(value)) {
+  // Uint8Array as well as Buffer: bytes that crossed a process boundary (the
+  // SQLite query child) arrive as the plain typed array.
+  if (value instanceof Uint8Array) {
     return `[binary:${value.length}]`;
   }
   if (typeof value === "bigint") {

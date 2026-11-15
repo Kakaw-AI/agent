@@ -29,6 +29,10 @@ COPY --from=build /app/dist ./dist
 COPY package.json ./
 USER node
 EXPOSE 8000
+# Lets the orchestrator hold traffic until the server is up and replace a hung
+# container. The image has no curl; node's own fetch does the job.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:' + (process.env.PORT || 8000) + '/healthz').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
 # Preload the OpenTelemetry ESM hook + SDK before the server so auto-
 # instrumentations can patch http/pg/undici. Telemetry stays off unless
 # OTEL_EXPORTER_OTLP_ENDPOINT is set.
