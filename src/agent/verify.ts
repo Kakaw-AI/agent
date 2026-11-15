@@ -30,6 +30,8 @@ export async function verify(state: State, config: NodeConfig) {
         rows: state.rows,
         rowCount: state.rowCount,
       }),
+      name: "verify",
+      light: true,
       temperature: 0,
       signal,
       ...hooks,

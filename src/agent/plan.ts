@@ -3,7 +3,7 @@ import { RESULT_CACHE_STRICT } from "../config.js";
 import { didYouMeanFromEntries } from "../graph/field-resolution.js";
 import { computeCacheKey, getCachedPlan } from "../llm/cache.js";
 import { previousTurnAskedUser } from "../llm/intent/history.js";
-import { invokeStructured } from "../llm/invoke.js";
+import { invokeStructured, LlmReplyError } from "../llm/invoke.js";
 import { SqlDraftSchema } from "../llm/schemas.js";
 import { PostgresSqlPromptBuilder } from "../prompts/database/PostgresSqlPromptBuilder.js";
 import { SqliteSqlPromptBuilder } from "../prompts/database/SqliteSqlPromptBuilder.js";
@@ -141,6 +141,7 @@ export async function generate(state: State, config: NodeConfig) {
         fieldSuggestions: didYouMeanFromEntries(state.fieldResolutions),
       }),
       history: request.history,
+      name: feedback ? "rewrite_sql" : "generate_sql",
       temperature: 0.1,
       signal,
       ...hooks,
@@ -150,7 +151,11 @@ export async function generate(state: State, config: NodeConfig) {
     const message = error instanceof Error ? error.message : "SQL generation failed.";
     return new Command({
       goto: "finalize",
-      update: { errorMessage: message, steps: [...steps, { text: `Failed: ${message}`, at: new Date().toISOString() }] } satisfies Update,
+      update: {
+        errorMessage: message,
+        tokenUsage: error instanceof LlmReplyError ? error.tokenUsage : null,
+        steps: [...steps, { text: `Failed: ${message}`, at: new Date().toISOString() }],
+      } satisfies Update,
     });
   }
 

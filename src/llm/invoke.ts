@@ -12,9 +12,22 @@ import type { InvokeResult, LlmCall } from "./types.js";
 const isLocal = (llm: LlmCall["llm"]) => llm.provider === "ollama" || llm.provider === "lm-studio";
 const timeoutMs = (llm: LlmCall["llm"]) => (isLocal(llm) ? LOCAL_LLM_TIMEOUT_MS : LLM_TIMEOUT_MS);
 
+const lowThinking = (input: LlmCall) => Boolean(input.light || input.llm.disableThinking);
+
+function model(input: LlmCall, temperature: number) {
+  return createLangChainModel(input.llm, temperature, input.maxTokens, lowThinking(input));
+}
+
+/** Failed calls still cost tokens; callers read this to keep the run's total honest. */
+export class LlmReplyError extends Error {
+  constructor(message: string, readonly tokenUsage: TokenUsage | null) {
+    super(message);
+  }
+}
+
 function toMessages(input: LlmCall) {
   // "/no_think" is the Qwen-family soft switch that LM Studio and Ollama pass through.
-  const suffix = input.llm.disableThinking && isLocal(input.llm) ? " /no_think" : "";
+  const suffix = lowThinking(input) && isLocal(input.llm) ? " /no_think" : "";
   return [
     buildSystemMessage(input.llm.provider, input.systemPrompt),
     ...toLangChainMessages(input.history ?? []),
@@ -47,7 +60,7 @@ export async function invokeStructured<T>(
   // Cast to the base type: the concrete Chat* classes declare incompatible
   // `withStructuredOutput` overloads, so calling it on their union does not
   // type-check. The method exists on every provider.
-  const structured = (createLangChainModel(input.llm, temperature, input.maxTokens) as BaseChatModel).withStructuredOutput(
+  const structured = (model(input, temperature) as BaseChatModel).withStructuredOutput(
     input.schema,
     { includeRaw: true },
   );
@@ -57,7 +70,7 @@ export async function invokeStructured<T>(
 
   let response: { raw: AIMessage; parsed: T | null };
   try {
-    response = (await structured.invoke(toMessages(input), { signal })) as typeof response;
+    response = (await structured.invoke(toMessages(input), { signal, runName: input.name })) as typeof response;
   } catch (error) {
     if (timeout.aborted) throw timeoutError(input.llm);
     throw error;
@@ -81,7 +94,7 @@ export async function invokeStructured<T>(
       // keep the default reason
     }
     console.warn(`[llm] unparsable structured reply from ${input.llm.model}: why=${why} length=${full.length} tail=${JSON.stringify(full.slice(-200))} tool_calls=${calls}`);
-    throw new Error(`The model's reply did not match the expected format (${why}). Got: ${raw || calls}`);
+    throw new LlmReplyError(`The model's reply did not match the expected format (${why}). Got: ${raw || calls}`, tokenUsage);
   }
   return { value: response.parsed, tokenUsage };
 }
@@ -109,7 +122,7 @@ export async function invokeStream(
   let content = "";
   let aggregate: AIMessageChunk | null = null;
   try {
-    const stream = await createLangChainModel(input.llm, temperature, input.maxTokens).stream(toMessages(input), { signal });
+    const stream = await model(input, temperature).stream(toMessages(input), { signal, runName: input.name });
     for await (const chunk of stream) {
       clearTimeout(timer);
       aggregate = aggregate ? aggregate.concat(chunk) : chunk;

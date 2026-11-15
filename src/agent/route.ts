@@ -53,6 +53,8 @@ export async function route(_state: State, config: NodeConfig) {
       const result = await invokeStructured({
         llm: request.llm,
         ...new RoutePromptBuilder().build({ history: request.history, message }),
+        name: "route",
+        light: true,
         temperature: 0,
         signal,
         ...hooks,
@@ -111,11 +113,13 @@ export async function route(_state: State, config: NodeConfig) {
 
   // The fields above came out of regexes over the question, so they are
   // whatever the user typed. Reconcile them with the catalog before anything
-  // downstream compares them for equality.
-  const resolution = resolveVisualizationRequestFields(
-    parsedRequest,
-    getSchemaIndex(request.knowledge, request.database.schemaFingerprint),
-  );
+  // downstream compares them for equality. Not when charting the previous
+  // result: its columns are fixed, and matching "scene by country as a chart"
+  // against the catalog only produced a confusing step.
+  const resolution =
+    kind === "chart_previous"
+      ? null
+      : resolveVisualizationRequestFields(parsedRequest, getSchemaIndex(request.knowledge, request.database.schemaFingerprint));
   const visualizationRequest = resolution?.request ?? parsedRequest;
   const note = describeFieldResolution(resolution);
   if (note) steps.push(step(note));

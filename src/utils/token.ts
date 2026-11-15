@@ -19,5 +19,6 @@ export function mergeTokenUsage(
     totalTokens: left.totalTokens + right.totalTokens,
     cacheReadTokens: (left.cacheReadTokens ?? 0) + (right.cacheReadTokens ?? 0),
     cacheWriteTokens: (left.cacheWriteTokens ?? 0) + (right.cacheWriteTokens ?? 0),
+    reasoningTokens: (left.reasoningTokens ?? 0) + (right.reasoningTokens ?? 0),
   };
 }

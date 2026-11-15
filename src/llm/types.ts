@@ -29,6 +29,14 @@ export type LlmCall = {
   signal?: AbortSignal;
   /** Upper bound on the reply; generous, since reasoning models count their thinking. */
   maxTokens?: number;
+  /** Trace name for this call, e.g. "route" or "generate_sql". */
+  name: string;
+  /**
+   * A small, mechanical reply (route, verify, chart, suggestions, the answer):
+   * keep the model's thinking short. The SQL draft leaves it to the user's
+   * Think toggle.
+   */
+  light?: boolean;
   onLlmCall?: LlmCallHook;
   onLlmResponse?: LlmResponseHook;
 };

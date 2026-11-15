@@ -112,7 +112,7 @@ export type AgentLlmRuntime = {
   apiKey: string;
   baseUrl?: string;
   headers?: Record<string, string>;
-  /** User turned thinking off in the chat bar; honoured for local models only. */
+  /** User turned thinking off in the chat bar; the SQL draft then thinks briefly too. */
   disableThinking?: boolean;
 };
 
@@ -160,6 +160,8 @@ export type TokenUsage = {
    */
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
+  /** Hidden thinking, already counted in outputTokens. */
+  reasoningTokens?: number;
 };
 
 export type VisualizationRequest = {

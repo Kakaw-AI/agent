@@ -19,15 +19,43 @@ type ChatModel = ChatOpenAI | ChatAnthropic | ChatGoogleGenerativeAI;
 const MODEL_CACHE_MAX = 16;
 const modelCache = new Map<string, ChatModel>();
 
-function modelCacheKey(llm: LLMRuntime, temperature: number, maxTokens?: number): string {
+function modelCacheKey(llm: LLMRuntime, temperature: number, maxTokens: number | undefined, lowThinking: boolean): string {
   return [
     llm.provider,
     llm.model,
     temperature,
     maxTokens ?? "",
+    lowThinking ? "low" : "",
     llm.baseUrl ?? "",
     llm.apiKey ?? "",
   ].join("\0");
+}
+
+/**
+ * Provider options that keep a reasoning model's hidden thinking short.
+ *
+ * Traces showed thinking was most of the latency: ~930 hidden tokens per call
+ * against ~70 visible, up to 6,400 on one SQL draft (45 s). Only models known to
+ * take the option get it; the rest would reject an unknown parameter.
+ * Anthropic thinks only when asked to, so it needs nothing; local models get
+ * "/no_think" in the prompt instead (invoke.ts).
+ */
+export function lowThinkingOptions(llm: LLMRuntime): Record<string, unknown> {
+  const model = llm.model.toLowerCase().replace(/^models\//, "");
+  switch (llm.provider) {
+    case "google":
+      // 2.5 takes a token budget (Pro cannot go below 128); 3 and later take a level.
+      if (model.startsWith("gemini-2.5")) return { thinkingConfig: { thinkingBudget: model.includes("pro") ? 128 : 0 } };
+      if (/^gemini-([3-9]|\d{2})/.test(model)) return { thinkingConfig: { thinkingLevel: "LOW" } };
+      return {};
+    case "openai":
+      return /^(o\d|gpt-([5-9]|\d{2}))/.test(model) && !model.includes("-chat") ? { reasoningEffort: "low" } : {};
+    case "openrouter":
+      // OpenRouter maps this onto each provider and ignores it for models that do not reason.
+      return { modelKwargs: { reasoning: { effort: "low" } } };
+    default:
+      return {};
+  }
 }
 
 /**
@@ -39,8 +67,9 @@ export function createLangChainModel(
   llm: LLMRuntime,
   temperature: number,
   maxTokens?: number,
+  lowThinking = false,
 ): ChatModel {
-  const key = modelCacheKey(llm, temperature, maxTokens);
+  const key = modelCacheKey(llm, temperature, maxTokens, lowThinking);
   const cached = modelCache.get(key);
   if (cached) {
     modelCache.delete(key);
@@ -48,7 +77,7 @@ export function createLangChainModel(
     return cached;
   }
 
-  const model = buildLangChainModel(llm, temperature, maxTokens);
+  const model = buildLangChainModel(llm, temperature, maxTokens, lowThinking ? lowThinkingOptions(llm) : {});
   modelCache.set(key, model);
 
   while (modelCache.size > MODEL_CACHE_MAX) {
@@ -65,7 +94,8 @@ export function createLangChainModel(
 function buildLangChainModel(
   llm: LLMRuntime,
   temperature: number,
-  maxTokens?: number,
+  maxTokens: number | undefined,
+  thinking: Record<string, unknown>,
 ): ChatModel {
   switch (llm.provider) {
     case "openai":
@@ -77,6 +107,7 @@ function buildLangChainModel(
         apiKey: llm.apiKey || "empty",
         temperature,
         ...(maxTokens ? { maxTokens } : {}),
+        ...thinking,
         configuration: {
           baseURL:
             llm.provider === "openrouter"
@@ -101,6 +132,7 @@ function buildLangChainModel(
         apiKey: llm.apiKey,
         temperature,
         ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
+        ...thinking,
       });
   }
 }
@@ -145,10 +177,19 @@ export function extractTokenUsage(response: AIMessage): TokenUsage | null {
     | { cache_read?: number; cache_creation?: number }
     | undefined;
 
+  // Gemini leaves thinking out of output_tokens but counts it in the total, and
+  // bills it as output. OpenAI already includes it in output_tokens. Folding
+  // the gap into output makes both report what the call cost.
+  const input = usage.input_tokens ?? 0;
+  const output = usage.output_tokens ?? 0;
+  const hidden = Math.max(0, (usage.total_tokens ?? 0) - input - output);
+  const reasoning = (usage.output_token_details as { reasoning?: number } | undefined)?.reasoning ?? hidden;
+
   return {
-    inputTokens: usage.input_tokens ?? 0,
-    outputTokens: usage.output_tokens ?? 0,
-    totalTokens: usage.total_tokens ?? 0,
+    inputTokens: input,
+    outputTokens: output + hidden,
+    totalTokens: usage.total_tokens ?? input + output,
+    reasoningTokens: reasoning,
     cacheReadTokens: details?.cache_read ?? 0,
     cacheWriteTokens: details?.cache_creation ?? 0,
   };
