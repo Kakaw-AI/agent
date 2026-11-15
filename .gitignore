@@ -6,3 +6,7 @@ dist
 *.log
 coverage
 .DS_Store
+
+# eval fixture database (regenerated on every run)
+eval/.data/
+eval/results/*.log
