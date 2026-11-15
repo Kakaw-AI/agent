@@ -70,10 +70,18 @@ export async function invokeStructured<T>(
   if (response.parsed === null || response.parsed === undefined) {
     // The raw reply is the only clue to why parsing failed (prose, empty, a
     // tool call with bad args); keep a short copy in the error for traces/logs.
-    const raw = flattenContentRaw(response.raw.content).trim().slice(0, 300);
+    const full = flattenContentRaw(response.raw.content).trim();
+    const raw = full.slice(0, 300);
     const calls = JSON.stringify(response.raw.tool_calls ?? []).slice(0, 300);
-    console.warn(`[llm] unparsable structured reply from ${input.llm.model}: content=${JSON.stringify(raw)} tool_calls=${calls}`);
-    throw new Error(`The model's reply did not match the expected format. Got: ${raw || calls}`);
+    let why = "not valid JSON (cut off or prose)";
+    try {
+      const check = input.schema.safeParse(JSON.parse(full));
+      if (!check.success) why = check.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
+    } catch {
+      // keep the default reason
+    }
+    console.warn(`[llm] unparsable structured reply from ${input.llm.model}: why=${why} length=${full.length} tail=${JSON.stringify(full.slice(-200))} tool_calls=${calls}`);
+    throw new Error(`The model's reply did not match the expected format (${why}). Got: ${raw || calls}`);
   }
   return { value: response.parsed, tokenUsage };
 }
