@@ -52,12 +52,12 @@ export abstract class BaseSqlPromptBuilder {
   ): string {
     const schemaLines = knowledge.tables.map((table) => this.buildSchemaLine(table));
 
+    // Everything up to the catalog is the same for every question on this
+    // database, so providers can serve it from their prompt cache. The
+    // per-question visualization lines go last; before the catalog they broke
+    // the shared prefix whenever one question wanted a chart and the next did not.
     return [
       ...this.buildDialectInstructions(),
-      this.buildVisualizationModeInstruction(options),
-      this.buildVisualizationFieldsInstruction(options),
-      this.buildVisualizationDimensionInstruction(options),
-      this.buildMetricInstruction(options),
       "Every aggregate metric must have a readable user-facing alias such as model_count, total_revenue, or average_rating.",
       "When you filter on a text column, use a value exactly as it appears in the catalog examples (same spelling and case). If the example values do not include the one you need, match case-insensitively.",
       "Earlier turns of the conversation include the SQL they ran. For a follow-up, start from that SQL and change only what the new question changes.",
@@ -65,6 +65,11 @@ export abstract class BaseSqlPromptBuilder {
       `Knowledge summary: ${knowledge.summary || "No summary available."}`,
       "Catalog:",
       ...schemaLines,
+      "For this question:",
+      this.buildVisualizationModeInstruction(options),
+      this.buildVisualizationFieldsInstruction(options),
+      this.buildVisualizationDimensionInstruction(options),
+      this.buildMetricInstruction(options),
     ].join("\n");
   }
 
