@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { leaksDatabaseValues } from "../../src/agent/web.js";
+import { leaksDatabaseValues, userTypedText } from "../../src/agent/web.js";
 
 describe("leaksDatabaseValues", () => {
   const values = new Set(["acme corp", "jane.doe@example.com", "asia pacific"]);
@@ -15,5 +15,19 @@ describe("leaksDatabaseValues", () => {
 
   it("allows a generic query", () => {
     expect(leaksDatabaseValues("average SaaS churn rate 2026", "is our churn high?", values)).toBe(false);
+  });
+});
+
+describe("userTypedText", () => {
+  it("includes earlier user turns, so a name typed before can be searched in a follow-up", () => {
+    const text = userTypedText({
+      message: "what is her latest video online?",
+      history: [
+        { role: "user", content: "who is Acme Corp" },
+        { role: "assistant", content: "Acme Corp is a customer since 2021." },
+      ],
+    } as never);
+    expect(leaksDatabaseValues("Acme Corp latest video", text, new Set(["acme corp"]))).toBe(false);
+    expect(text).not.toContain("customer since");
   });
 });

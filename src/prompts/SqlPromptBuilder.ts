@@ -16,8 +16,8 @@ function webInstructions(): string[] {
     return ["Always set needsWeb to false and webQuery empty."];
   }
   return [
-    "WEB SEARCH: set needsWeb to true only when answering needs facts that are not in this database and change over time or come from outside it: industry benchmarks, market prices, exchange rates, public statistics, definitions, news. Then write webQuery: a short, generic search query in English.",
-    "webQuery must NEVER contain names, IDs, amounts, emails or any other value from this database or from earlier results. Search for the outside fact only, e.g. 'average SaaS churn rate 2026', never a customer or product name taken from the data.",
+    "WEB SEARCH: set needsWeb to true when answering needs facts that are not in this database or are newer than it: anything the user asks about 'online', 'on the internet', 'latest' or 'current' beyond what the database stores, public facts about a person, company or product, industry benchmarks, market prices, exchange rates, public statistics, definitions, news. Then write webQuery: a short search query.",
+    "webQuery may use names and terms the user typed in their own messages. It must NEVER add a value the user did not type: no names, IDs, amounts or emails taken from this database or from earlier results. E.g. if the user asked about 'Acme Corp', 'Acme Corp latest news' is fine; never search for a customer the user did not name.",
     "If the question needs both the database and the web (e.g. comparing our churn to the industry average), write the SQL AND set needsWeb with webQuery. If it needs only the web, leave sql empty. If the database alone answers it, set needsWeb to false and leave webQuery empty.",
   ];
 }

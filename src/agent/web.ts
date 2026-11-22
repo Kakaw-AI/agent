@@ -22,14 +22,19 @@ export function databaseValues(request: AgentRunRequest): Set<string> {
   return values;
 }
 
+/** Everything the user typed in this conversation: values in it are theirs to search for. */
+export function userTypedText(request: AgentRunRequest): string {
+  return [...request.history.filter((turn) => turn.role === "user").map((turn) => turn.content), request.message].join("\n");
+}
+
 /**
  * True when a search query would send data from the user's database to the
- * search engine: it contains a database value the user did not type themselves.
- * Such a search is dropped, not edited.
+ * search engine: it contains a database value the user did not type themselves
+ * (in this message or an earlier one). Such a search is dropped, not edited.
  */
-export function leaksDatabaseValues(query: string, message: string, values: Set<string>): boolean {
+export function leaksDatabaseValues(query: string, userText: string, values: Set<string>): boolean {
   const lowerQuery = query.toLowerCase();
-  const lowerMessage = message.toLowerCase();
+  const lowerMessage = userText.toLowerCase();
   for (const value of values) {
     if (lowerQuery.includes(value) && !lowerMessage.includes(value)) return true;
   }

@@ -9,7 +9,7 @@ import { PostgresSqlPromptBuilder } from "../prompts/database/PostgresSqlPromptB
 import { SqliteSqlPromptBuilder } from "../prompts/database/SqliteSqlPromptBuilder.js";
 import { VisualizationSqlUserPromptBuilder } from "../prompts/VisualizationSqlUserPromptBuilder.js";
 import { webSearchConfigured } from "../net/web-search.js";
-import { databaseValues, leaksDatabaseValues } from "./web.js";
+import { databaseValues, leaksDatabaseValues, userTypedText } from "./web.js";
 import { type NodeConfig, runtime, type SqlFeedback, type State, type Update } from "./state.js";
 
 /** SQL drafts the model may write in one run: the first plus three repairs. */
@@ -25,10 +25,10 @@ export const MAX_GENERATIONS = 4;
  * The search to run, or "" for none. A query carrying values from the user's
  * database is dropped: the search engine is a third party.
  */
-function planWebQuery(needsWeb: boolean, raw: string, message: string, request: Parameters<typeof databaseValues>[0]): string {
+function planWebQuery(needsWeb: boolean, raw: string, request: Parameters<typeof databaseValues>[0]): string {
   const query = raw.trim().slice(0, 200);
   if (!needsWeb || !query || !webSearchConfigured()) return "";
-  return leaksDatabaseValues(query, message, databaseValues(request)) ? "" : query;
+  return leaksDatabaseValues(query, userTypedText(request), databaseValues(request)) ? "" : query;
 }
 
 export function retryOrGiveUp(
@@ -196,7 +196,7 @@ export async function generate(state: State, config: NodeConfig) {
   // A repair keeps the search the first draft asked for.
   // Small models sometimes drop fields they were told to return.
   const rawWebQuery = typeof value.webQuery === "string" ? value.webQuery : "";
-  const webQuery = planWebQuery(value.needsWeb === true, rawWebQuery, request.message, request) || state.webQuery;
+  const webQuery = planWebQuery(value.needsWeb === true, rawWebQuery, request) || state.webQuery;
   const toolCalls: Array<Record<string, unknown>> = [{ tool: "sql_generation", sql, rationale: value.rationale }];
   if (value.needsWeb === true && rawWebQuery.trim() && !webQuery) {
     toolCalls.push({ tool: "web_search", dropped: "query contained database values" });
