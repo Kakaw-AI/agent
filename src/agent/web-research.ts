@@ -6,14 +6,17 @@ import type { AgentRunRequest, TokenUsage } from "../types.js";
 import { mergeTokenUsage } from "../utils/token.js";
 import { databaseContext, planWebQuery, WEB_WHERE_TO_LOOK } from "./web.js";
 
-/** Search rounds per answer: the first query, then up to two rounds of better ones. */
-const MAX_ROUNDS = 3;
+/** Search rounds per answer at most; the check usually stops it long before. */
+const MAX_ROUNDS = 20;
+/** Rounds in a row that find nothing at all before giving up: the engine is blocking us. */
+const MAX_EMPTY_ROUNDS = 3;
 /** Queries searched side by side in a follow-up round, e.g. one per person asked about. */
 const MAX_QUERIES_PER_ROUND = 3;
 /** Sources handed to the answer, across all rounds. */
-const MAX_SOURCES = 10;
-/** Page text the sufficiency check reads per source. */
+const MAX_SOURCES = 16;
+/** Page text the sufficiency check reads per source, shared out when there are many. */
 const CHECK_CHARS = 1500;
+const CHECK_BUDGET = 30_000;
 
 type Step = (text: string) => { text: string; at: string };
 
@@ -47,6 +50,7 @@ export async function researchWeb(input: {
   const tried = new Set<string>();
   let tokenUsage: TokenUsage | null = null;
   let queries = [input.firstQuery];
+  let emptyRounds = 0;
 
   for (let round = 1; round <= MAX_ROUNDS; round += 1) {
     for (const query of queries) tried.add(query.toLowerCase());
@@ -68,6 +72,9 @@ export async function researchWeb(input: {
     });
     // The server is down: another round would fail the same way.
     if (searches.every((search) => search.status === "rejected")) break;
+    const foundAny = searches.some((search) => search.status === "fulfilled" && search.value.length > 0);
+    emptyRounds = foundAny ? 0 : emptyRounds + 1;
+    if (emptyRounds >= MAX_EMPTY_ROUNDS) break;
 
     if (round === MAX_ROUNDS) break;
 
@@ -87,7 +94,7 @@ export async function researchWeb(input: {
           `What the user's database is about:\n${databaseContext(request)}`,
           `Queries tried: ${[...tried].join(" | ")}`,
           sources.length
-            ? `Sources so far:\n${sources.map((source, index) => `[${index + 1}] ${source.title} (${source.url})\n${source.content.slice(0, CHECK_CHARS)}`).join("\n\n")}`
+            ? `Sources so far:\n${sources.map((source, index) => `[${index + 1}] ${source.title} (${source.url})\n${source.content.slice(0, Math.max(300, Math.min(CHECK_CHARS, Math.floor(CHECK_BUDGET / sources.length))))}`).join("\n\n")}`
             : "Sources so far: none usable.",
         ].join("\n\n"),
         name: "check_web_results",
