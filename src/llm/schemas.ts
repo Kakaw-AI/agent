@@ -26,6 +26,9 @@ export const SqlDraftSchema = z.object({
 export const VerifySchema = z.object({
   answersQuestion: z.boolean(),
   problem: z.string(),
+  /** The result is not enough on its own (outdated, outside the data, empty, conflicting); search with webQuery. */
+  needsWeb: z.boolean(),
+  webQuery: z.string(),
 });
 
 // An object, not a bare array: tool-calling providers require an object at

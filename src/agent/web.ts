@@ -1,3 +1,4 @@
+import { webSearchConfigured } from "../net/web-search.js";
 import type { AgentRunRequest } from "../types.js";
 
 /** Shorter values ("US", "2024", "Yes") are too common to identify anything. */
@@ -40,3 +41,18 @@ export function leaksDatabaseValues(query: string, userText: string, values: Set
   }
   return false;
 }
+
+/**
+ * The search a model step asked for, or "" for none. A query carrying values
+ * from the user's database is dropped: the search engine is a third party.
+ * Fields are checked loosely because small models sometimes omit them.
+ */
+export function planWebQuery(needsWeb: unknown, raw: unknown, request: AgentRunRequest): string {
+  const query = typeof raw === "string" ? raw.trim().slice(0, 200) : "";
+  if (needsWeb !== true || !query || !webSearchConfigured()) return "";
+  return leaksDatabaseValues(query, userTypedText(request), databaseValues(request)) ? "" : query;
+}
+
+/** The prompt rules for writing a search query, shared by the draft and the review. */
+export const WEB_QUERY_RULES =
+  "webQuery may use names and terms the user typed in their own messages. It must NEVER add a value the user did not type: no names, IDs, amounts or emails taken from this database or from earlier results. E.g. if the user asked about 'Acme Corp', 'Acme Corp latest news' is fine; never search for a customer the user did not name.";

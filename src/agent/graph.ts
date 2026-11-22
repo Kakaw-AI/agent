@@ -54,7 +54,7 @@ export const agentGraph = new StateGraph(AgentState, RunContextSchema)
   .addNode("execute", instrumented("execute", execute), {
     ends: ["execute", "generate", "checkValues", "verify", "accept", "finalize"],
   })
-  .addNode("checkValues", instrumented("checkValues", checkValues), { ends: ["execute", "generate", "accept"] })
+  .addNode("checkValues", instrumented("checkValues", checkValues), { ends: ["execute", "generate", "verify", "accept"] })
   .addNode("verify", instrumented("verify", verify), { ends: ["generate", "accept"] })
   .addNode("accept", instrumented("accept", accept))
   // Node names differ from state keys (answer, suggestions); LangGraph requires that.

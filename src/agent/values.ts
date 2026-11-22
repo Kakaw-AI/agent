@@ -2,6 +2,7 @@ import { Command } from "@langchain/langgraph";
 import { executeReadOnlyQuery } from "../database/query.js";
 import { SECRET_FIELD_PATTERN } from "../database/sanitize.js";
 import type { AgentDatabaseRuntime, DatabaseCatalogTable, DatabaseKnowledgeRuntime } from "../types.js";
+import { afterEmptyResult } from "./execute.js";
 import { MAX_GENERATIONS } from "./plan.js";
 import { type NodeConfig, runtime, type State, type Update } from "./state.js";
 
@@ -140,7 +141,7 @@ export async function checkValues(state: State, config: NodeConfig) {
   const { request, step } = runtime(config, "checkValues");
   const filters = extractLiteralFilters(state.sql);
   if (filters.length === 0) {
-    return new Command({ goto: "accept", update: { valuesChecked: true } satisfies Update });
+    return new Command({ goto: afterEmptyResult(state), update: { valuesChecked: true } satisfies Update });
   }
 
   const steps = [step("The query found nothing; checking the values it filtered on...")];
@@ -216,5 +217,5 @@ export async function checkValues(state: State, config: NodeConfig) {
     });
   }
 
-  return new Command({ goto: "accept", update: { valuesChecked: true, repairHistory, steps } satisfies Update });
+  return new Command({ goto: afterEmptyResult(state), update: { valuesChecked: true, repairHistory, steps } satisfies Update });
 }

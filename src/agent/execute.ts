@@ -14,6 +14,7 @@ import {
   decideVisualizationCapability,
   validateVisualizationResult,
 } from "../graph/visualization.js";
+import { webSearchConfigured } from "../net/web-search.js";
 import { retryOrGiveUp } from "./plan.js";
 import { type NodeConfig, runtime, type State, type Update } from "./state.js";
 
@@ -157,6 +158,14 @@ function shouldVerify(state: State): boolean {
 }
 
 /**
+ * Where a confirmed empty result goes. With web search on it is reviewed too,
+ * since the answer may exist publicly; otherwise straight to the answer.
+ */
+export function afterEmptyResult(state: State): "verify" | "accept" {
+  return webSearchConfigured() && shouldVerify(state) && !state.webQuery ? "verify" : "accept";
+}
+
+/**
  * Runs the current SQL and decides where the run goes next: a free identifier
  * fix, a model repair, a check of the filtered values when nothing came back,
  * a review of the result, or straight to the answer.
@@ -293,5 +302,5 @@ export async function execute(state: State, config: NodeConfig) {
   if (result.rowCount > 0 && shouldVerify(state)) {
     return new Command({ goto: "verify", update });
   }
-  return new Command({ goto: "accept", update });
+  return new Command({ goto: result.rowCount > 0 ? "accept" : afterEmptyResult(state), update });
 }

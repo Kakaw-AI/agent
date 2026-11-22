@@ -4,6 +4,7 @@ import { VerifySchema } from "../llm/schemas.js";
 import { VerifyPromptBuilder } from "../prompts/VerifyPromptBuilder.js";
 import { MAX_GENERATIONS } from "./plan.js";
 import { type NodeConfig, runtime, type State, type Update } from "./state.js";
+import { planWebQuery } from "./web.js";
 
 /**
  * Reviews an executed result against the question before it is shown.
@@ -64,12 +65,15 @@ export async function verify(state: State, config: NodeConfig) {
     });
   }
 
+  // The result stands, but may not be enough on its own: search as well.
+  const webQuery = state.webQuery || planWebQuery(value.needsWeb, value.webQuery, request);
   return new Command({
     goto: "accept",
     update: {
       tokenUsage,
-      steps,
-      toolCalls: [{ tool: "verification", answersQuestion: value.answersQuestion, problem }],
+      steps: webQuery && !state.webQuery ? [...steps, step("The data alone may not be enough; checking the web too...")] : steps,
+      toolCalls: [{ tool: "verification", answersQuestion: value.answersQuestion, problem, needsWeb: Boolean(webQuery) }],
+      ...(webQuery ? { webQuery } : {}),
     } satisfies Update,
   });
 }

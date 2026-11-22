@@ -1,3 +1,5 @@
+import { WEB_QUERY_RULES } from "../agent/web.js";
+import { webSearchConfigured } from "../net/web-search.js";
 import type { DatabaseKnowledgeRuntime } from "../types.js";
 
 const SAMPLE_ROWS = 10;
@@ -31,9 +33,16 @@ export class VerifyPromptBuilder {
     return {
       systemPrompt: [
         "You check whether a SQL query and its result correctly answer a user's question about a database.",
-        'Return JSON {"answersQuestion": boolean, "problem": string}.',
+        'Return JSON {"answersQuestion": boolean, "problem": string, "needsWeb": boolean, "webQuery": string}.',
         "Set answersQuestion to false only for a clear mistake: the wrong table or column, a missing or wrong filter, the wrong time range, the wrong grouping or aggregation, or a result that cannot contain the answer. Describe the mistake in one sentence in problem.",
         "Do not flag column names, extra columns, row order, rounding, or formatting. If you are unsure, set answersQuestion to true and leave problem empty.",
+        ...(webSearchConfigured()
+          ? [
+              "Separately, decide whether to also search the web. Set needsWeb to true when this result, even if the query is right, is not enough to answer confidently: the question asks for something newer than or outside what the database stores (online, latest, current, public facts about a person, company or product); the result is empty but the answer likely exists publicly; or the rows hold conflicting values for the same thing that public sources could settle. Then write webQuery, a short search query.",
+              WEB_QUERY_RULES,
+              "Otherwise set needsWeb to false and leave webQuery empty.",
+            ]
+          : ["Always set needsWeb to false and webQuery empty."]),
         "Schema:",
         catalog,
       ].join("\n"),

@@ -330,6 +330,27 @@ describe("agent graph", () => {
       expect(trace(events).toolCalls.some((call: any) => call.tool === "sql_execution")).toBe(false);
     });
 
+    it("searches when the review finds the data alone is not enough", async () => {
+      script(SqlDraftSchema, draft("SELECT COUNT(*) AS customers FROM customers"));
+      script(VerifySchema, { answersQuestion: true, problem: "", needsWeb: true, webQuery: "typical SaaS customer count" });
+      const { result: events, calls } = await withFirecrawl(() => run("Is our customer count normal?"));
+
+      expect(find(events, "sql_result")?.rows).toEqual([{ customers: expect.any(Number) }]);
+      expect(calls).toHaveLength(1);
+      expect(find(events, "web_sources")?.sources).toHaveLength(1);
+      expect(trace(events).toolCalls.find((call: any) => call.tool === "verification")?.needsWeb).toBe(true);
+    });
+
+    it("reviews an empty result and searches when the answer may be public", async () => {
+      script(SqlDraftSchema, draft("SELECT id, name FROM customers WHERE id < 0"));
+      script(VerifySchema, { answersQuestion: true, problem: "", needsWeb: true, webQuery: "Globex latest product launch" });
+      const { result: events, calls } = await withFirecrawl(() => run("What did Globex launch most recently?"));
+
+      expect(promptsFor(VerifySchema)).toHaveLength(1);
+      expect(calls).toHaveLength(1);
+      expect(find(events, "message_completed")?.content).toBe(fake.answer);
+    });
+
     it("never searches when the server is not configured", async () => {
       script(SqlDraftSchema, draft("SELECT COUNT(*) AS customers FROM customers", "", "average customers per SaaS company"));
       const events = await run("How does our customer count compare to a typical SaaS?");
