@@ -56,13 +56,10 @@ async function firecrawl<T>(path: string, body: unknown, timeoutMs: number, sign
  * and reliable, and a page that fails only falls back to its own snippet.
  */
 export async function searchWeb(query: string, signal?: AbortSignal): Promise<WebSource[]> {
-  const payload = await firecrawl<{ data?: { web?: Array<{ url?: string; title?: string; description?: string }> } }>(
-    "/v2/search",
-    { query, limit: RESULTS },
-    SEARCH_TIMEOUT_MS,
-    signal,
-  );
-  const results = (payload.data?.web ?? []).filter((item) => typeof item.url === "string" && /^https?:\/\//.test(item.url));
+  // The engine behind our server sometimes gives up after a few seconds and
+  // still answers "success" with no results; the same query again works.
+  let results = await searchResults(query, signal);
+  if (results.length === 0) results = await searchResults(query, signal);
 
   const pages = await Promise.allSettled(
     results.slice(0, SCRAPE).map((item) =>
@@ -95,6 +92,16 @@ export async function searchWeb(query: string, signal?: AbortSignal): Promise<We
       return [];
     })
     .slice(0, KEEP);
+}
+
+async function searchResults(query: string, signal?: AbortSignal) {
+  const payload = await firecrawl<{ data?: { web?: Array<{ url?: string; title?: string; description?: string }> } }>(
+    "/v2/search",
+    { query, limit: RESULTS },
+    SEARCH_TIMEOUT_MS,
+    signal,
+  );
+  return (payload.data?.web ?? []).filter((item) => typeof item.url === "string" && /^https?:\/\//.test(item.url));
 }
 
 /** Lowercase words of the query worth matching against page text. */

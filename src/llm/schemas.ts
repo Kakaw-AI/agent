@@ -46,7 +46,7 @@ export const TitleSchema = z.object({
 /** Whether web results so far answer the question, and what to search next if not. */
 export const WebCheckSchema = z.object({
   enough: z.boolean(),
-  nextQuery: z.string(),
+  nextQueries: z.array(z.string()),
 });
 
 export const ChartPlanSchema = z.object({

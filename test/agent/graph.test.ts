@@ -84,7 +84,7 @@ beforeEach(() => {
   fake.defaults.set(VerifySchema, () => ({ answersQuestion: true, problem: "" }));
   fake.defaults.set(SuggestionsSchema, () => ({ suggestions: ["One?", "Two?", "Three?"] }));
   fake.defaults.set(ChartPlanSchema, () => ({ kind: "bar", title: "", xField: "missing", yField: "missing" }));
-  fake.defaults.set(WebCheckSchema, () => ({ enough: true, nextQuery: "" }));
+  fake.defaults.set(WebCheckSchema, () => ({ enough: true, nextQueries: [] }));
 });
 
 function script(schema: unknown, ...replies: unknown[]) {
@@ -317,7 +317,9 @@ describe("agent graph", () => {
           return new Response(JSON.stringify({ success: true, data: { markdown: pages.get(body.url) ?? "" } }));
         }
         if (url !== "https://fc.test/v2/search") throw new Error(`Unexpected fetch: ${url}`);
-        const reply = (responses[body.query] ?? searchResponse) as { data: { web: Array<{ url: string; markdown?: string }> } };
+        // An array is a series of replies to the same query, one per call.
+        const scripted = responses[body.query];
+        const reply = (Array.isArray(scripted) ? scripted.shift() : (scripted ?? searchResponse)) as { data: { web: Array<{ url: string; markdown?: string }> } };
         for (const item of reply.data.web) pages.set(item.url, item.markdown ?? "");
         return new Response(JSON.stringify(reply));
       });
@@ -400,7 +402,7 @@ describe("agent graph", () => {
 
     it("skips gate pages and searches again until the results answer the question", async () => {
       script(SqlDraftSchema, draft("", "", "Globex latest launch"));
-      script(WebCheckSchema, { enough: false, nextQuery: "Globex official site new product 2026" }, { enough: true, nextQuery: "" });
+      script(WebCheckSchema, { enough: false, nextQueries: ["Globex official site new product 2026", "Globex press release"] }, { enough: true, nextQueries: [] });
       const consent = "Before you continue to YouTube. We use cookies and data to deliver and maintain Google services. ".repeat(4);
       const responses = {
         "Globex latest launch": {
@@ -414,12 +416,16 @@ describe("agent graph", () => {
           },
         },
         "Globex official site new product 2026": { success: true, data: { web: [page("https://globex.example/launch", "Globex launches Widget 3")] } },
+        "Globex press release": { success: true, data: { web: [] } },
       };
       const { result: events, calls } = await withFirecrawl(() => run("What did Globex launch most recently?"), responses);
 
       expect(calls.map((call) => JSON.parse(String(call[1]?.body)).query)).toEqual([
         "Globex latest launch",
         "Globex official site new product 2026",
+        "Globex press release",
+        // An empty result is retried once: the search engine sometimes gives up early.
+        "Globex press release",
       ]);
       // Gated pages stay as title-and-snippet sources: their titles name what was asked about.
       expect(find(events, "web_sources")?.sources.map((source: any) => source.url)).toEqual([
@@ -428,6 +434,16 @@ describe("agent graph", () => {
         "https://example.com/globex-news",
         "https://globex.example/launch",
       ]);
+    });
+
+    it("retries a search that comes back empty", async () => {
+      script(SqlDraftSchema, draft("", "", "Globex latest launch"));
+      const empty = { success: true, data: { web: [] } };
+      const responses = { "Globex latest launch": [empty, { success: true, data: { web: [page("https://globex.example/launch", "Globex launches Widget 3")] } }] };
+      const { result: events, calls } = await withFirecrawl(() => run("What did Globex launch most recently?"), responses);
+
+      expect(calls).toHaveLength(2);
+      expect(find(events, "web_sources")?.sources.map((source: any) => source.url)).toEqual(["https://globex.example/launch"]);
     });
 
     it("never searches when the server is not configured", async () => {
