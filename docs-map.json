@@ -1,0 +1,41 @@
+{
+  "$comment": "Which docs pages describe which code. The user docs live in the frontend repo; architecture notes in the org .github repo under docs/. Used by scripts/docs-check.mjs and the docs-sync skill.",
+  "docsRepo": "../frontend",
+  "docsPath": "src/content/docs",
+  "rules": [
+    {
+      "paths": ["src/agent/**", "src/prompts/**"],
+      "docs": ["how-it-works.mdx", "chat/asking-questions.mdx", "troubleshooting.mdx"],
+      "architecture": ["03-agent.md"]
+    },
+    {
+      "paths": ["src/agent/web.ts", "src/agent/web-research.ts", "src/net/web-search.ts", "src/prompts/WebAnswerPromptBuilder.ts"],
+      "docs": ["web-search.mdx", "privacy-and-security.mdx"],
+      "architecture": ["03-agent.md"]
+    },
+    {
+      "paths": ["src/agent/title.ts"],
+      "docs": ["chat/controls.mdx"]
+    },
+    {
+      "paths": ["src/database/**", "src/net/public-host.ts"],
+      "docs": ["privacy-and-security.mdx", "data/schema-sync.mdx", "reference/limits.mdx"],
+      "architecture": ["05-security-and-operations.md", "04-data-and-sync.md"]
+    },
+    {
+      "paths": ["src/llm/**"],
+      "docs": ["models/providers.mdx", "models/thinking.mdx", "models/local-models.mdx"],
+      "architecture": ["03-agent.md"]
+    },
+    {
+      "paths": ["src/config.ts"],
+      "docs": ["reference/limits.mdx", "models/local-models.mdx"],
+      "architecture": ["05-security-and-operations.md"]
+    },
+    {
+      "paths": ["src/graph/**"],
+      "docs": ["chat/results.mdx"],
+      "architecture": ["03-agent.md"]
+    }
+  ]
+}
