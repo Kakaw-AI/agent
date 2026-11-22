@@ -66,13 +66,23 @@ export async function verify(state: State, config: NodeConfig) {
   }
 
   // The result stands, but may not be enough on its own: search as well.
-  const webQuery = state.webQuery || planWebQuery(value.needsWeb, value.webQuery, request);
+  const webQuery = state.webQuery || planWebQuery(value.needsWeb, value.webQuery, request, state.question);
+  // Recorded so a search the guard dropped shows up in the trace.
+  const droppedWebQuery = !webQuery && value.needsWeb === true && typeof value.webQuery === "string" ? value.webQuery.trim() : "";
   return new Command({
     goto: "accept",
     update: {
       tokenUsage,
       steps: webQuery && !state.webQuery ? [...steps, step("The data alone may not be enough; checking the web too...")] : steps,
-      toolCalls: [{ tool: "verification", answersQuestion: value.answersQuestion, problem, needsWeb: Boolean(webQuery) }],
+      toolCalls: [
+        {
+          tool: "verification",
+          answersQuestion: value.answersQuestion,
+          problem,
+          needsWeb: Boolean(webQuery),
+          ...(droppedWebQuery ? { webSearchDropped: droppedWebQuery } : {}),
+        },
+      ],
       ...(webQuery ? { webQuery } : {}),
     } satisfies Update,
   });

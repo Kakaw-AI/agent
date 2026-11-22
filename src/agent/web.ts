@@ -46,13 +46,18 @@ export function leaksDatabaseValues(query: string, userText: string, values: Set
  * The search a model step asked for, or "" for none. A query carrying values
  * from the user's database is dropped: the search engine is a third party.
  * Fields are checked loosely because small models sometimes omit them.
+ *
+ * `question` is the standalone form of the user's question. When the user
+ * refers to something from an earlier answer ("her latest video"), that form
+ * names it ("Yiny's latest video"), and searching for it is what they asked.
  */
-export function planWebQuery(needsWeb: unknown, raw: unknown, request: AgentRunRequest): string {
+export function planWebQuery(needsWeb: unknown, raw: unknown, request: AgentRunRequest, question = ""): string {
   const query = typeof raw === "string" ? raw.trim().slice(0, 200) : "";
   if (needsWeb !== true || !query || !webSearchConfigured()) return "";
-  return leaksDatabaseValues(query, userTypedText(request), databaseValues(request)) ? "" : query;
+  const allowed = `${userTypedText(request)}\n${question}`;
+  return leaksDatabaseValues(query, allowed, databaseValues(request)) ? "" : query;
 }
 
 /** The prompt rules for writing a search query, shared by the draft and the review. */
 export const WEB_QUERY_RULES =
-  "webQuery may use names and terms the user typed in their own messages. It must NEVER add a value the user did not type: no names, IDs, amounts or emails taken from this database or from earlier results. E.g. if the user asked about 'Acme Corp', 'Acme Corp latest news' is fine; never search for a customer the user did not name.";
+  "webQuery may use names and terms the user typed or clearly referred to (e.g. 'her latest video' right after an answer naming one person means that person). It must NEVER add a value the user did not ask about: no other names, IDs, amounts or emails taken from this database or from earlier results. E.g. if the user asked about 'Acme Corp', 'Acme Corp latest news' is fine; never search for a customer the user did not name or point to.";

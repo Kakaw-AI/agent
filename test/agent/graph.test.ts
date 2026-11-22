@@ -351,6 +351,30 @@ describe("agent graph", () => {
       expect(find(events, "message_completed")?.content).toBe(fake.answer);
     });
 
+    it("searches for a name the user pointed to with a pronoun", async () => {
+      const name = "Ava Martinez";
+      script(RouteSchema, { kind: "data", standaloneQuestion: `What is ${name}'s latest product review online?` });
+      script(SqlDraftSchema, draft("SELECT COUNT(*) AS customers FROM customers"));
+      script(VerifySchema, { answersQuestion: true, problem: "", needsWeb: true, webQuery: `${name} latest review` });
+      const history = turn("Who is our top customer?", "SELECT name FROM customers LIMIT 1", [{ name }]);
+      const { result: events, calls } = await withFirecrawl(() => run("what is her latest review online?", { history }));
+
+      expect(calls).toHaveLength(1);
+      expect(JSON.parse(String(calls[0][1]?.body)).query).toBe(`${name} latest review`);
+      expect(find(events, "web_sources")).toBeDefined();
+    });
+
+    it("drops a search for a database value the user never asked about", async () => {
+      const name = "Ava Martinez";
+      script(SqlDraftSchema, draft("SELECT COUNT(*) AS customers FROM customers"));
+      script(VerifySchema, { answersQuestion: true, problem: "", needsWeb: true, webQuery: `${name} net worth` });
+      const history = turn("Who is our top customer?", "SELECT name FROM customers LIMIT 1", [{ name }]);
+      const { result: events, calls } = await withFirecrawl(() => run("how many customers do we have?", { history }));
+
+      expect(calls).toHaveLength(0);
+      expect(trace(events).toolCalls.find((call: any) => call.tool === "verification")?.webSearchDropped).toBe(`${name} net worth`);
+    });
+
     it("never searches when the server is not configured", async () => {
       script(SqlDraftSchema, draft("SELECT COUNT(*) AS customers FROM customers", "", "average customers per SaaS company"));
       const events = await run("How does our customer count compare to a typical SaaS?");

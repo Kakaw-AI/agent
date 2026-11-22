@@ -184,7 +184,7 @@ export async function generate(state: State, config: NodeConfig) {
   const sql = value.sql.trim();
   // A repair keeps the search the first draft asked for.
   const rawWebQuery = typeof value.webQuery === "string" ? value.webQuery : "";
-  const webQuery = planWebQuery(value.needsWeb, rawWebQuery, request) || state.webQuery;
+  const webQuery = planWebQuery(value.needsWeb, rawWebQuery, request, state.question) || state.webQuery;
   const toolCalls: Array<Record<string, unknown>> = [{ tool: "sql_generation", sql, rationale: value.rationale }];
   if (value.needsWeb === true && rawWebQuery.trim() && !webQuery) {
     toolCalls.push({ tool: "web_search", dropped: "query contained database values" });
