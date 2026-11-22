@@ -12,6 +12,21 @@ import { LLMRuntime } from "./types.js";
 
 type ChatModel = ChatOpenAI | ChatAnthropic | ChatGoogleGenerativeAI;
 
+type GeminiSafety = NonNullable<ConstructorParameters<typeof ChatGoogleGenerativeAI>[0]>["safetySettings"];
+
+/**
+ * The user's own data decides what the answer talks about: an adult media
+ * library, crime statistics, medical records. Gemini's default filters returned
+ * an empty reply for such rows (a scene title was enough), which failed the
+ * whole turn, so the content filters are off. The data is the user's.
+ */
+const GEMINI_SAFETY = [
+  "HARM_CATEGORY_HARASSMENT",
+  "HARM_CATEGORY_HATE_SPEECH",
+  "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+  "HARM_CATEGORY_DANGEROUS_CONTENT",
+].map((category) => ({ category, threshold: "BLOCK_NONE" })) as unknown as GeminiSafety;
+
 // A client was constructed for every LLM call — up to eight per request. The
 // clients are stateless with respect to the messages they send, so one per
 // (provider, model, temperature, endpoint) is enough. Keyed on the API key too,
@@ -131,6 +146,7 @@ function buildLangChainModel(
         model: llm.model,
         apiKey: llm.apiKey,
         temperature,
+        safetySettings: GEMINI_SAFETY,
         ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
         ...thinking,
       });

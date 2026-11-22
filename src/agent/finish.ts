@@ -94,7 +94,13 @@ export async function answer(state: State, config: NodeConfig): Promise<Update> 
       ...hooks,
       onDelta: (delta) => emit({ type: "message_delta", data: { messageId: request.messageId, delta } }),
     });
-    return { answer: content, tokenUsage: mergeTokenUsage(researchUsage, tokenUsage), steps, toolCalls, webSources: sources };
+    return {
+      answer: content || emptyAnswerFallback(state.rowCount, sources.length),
+      tokenUsage: mergeTokenUsage(researchUsage, tokenUsage),
+      steps,
+      toolCalls,
+      webSources: sources,
+    };
   }
 
   if (state.rows.length === 0) {
@@ -131,7 +137,20 @@ export async function answer(state: State, config: NodeConfig): Promise<Update> 
     onDelta: (delta) => emit({ type: "message_delta", data: { messageId: request.messageId, delta } }),
   });
 
-  return { answer: content, tokenUsage, steps, toolCalls };
+  return { answer: content || emptyAnswerFallback(state.rowCount, 0), tokenUsage: mergeTokenUsage(researchUsage, tokenUsage), steps, toolCalls };
+}
+
+/**
+ * Stands in when the model returns no text (a provider content filter, an
+ * empty stream), so the turn still shows its table and sources instead of
+ * failing with no answer.
+ */
+function emptyAnswerFallback(rowCount: number, sourceCount: number): string {
+  const parts: string[] = [];
+  if (rowCount > 0) parts.push(`The query returned ${rowCount} matching ${rowCount === 1 ? "row" : "rows"}; they are in the table below.`);
+  if (sourceCount > 0) parts.push(`The web sources found are listed below.`);
+  if (parts.length === 0) parts.push("I couldn't write an answer for this one. Please try again or rephrase the question.");
+  return `${parts.join(" ")} The model returned no summary for this result.`;
 }
 
 export async function chart(state: State, config: NodeConfig): Promise<Update> {

@@ -119,6 +119,19 @@ describe("agent graph", () => {
     expect(fake.prompts.size).toBe(0);
   });
 
+  it("still completes the turn when the model returns an empty answer", async () => {
+    script(SqlDraftSchema, draft("SELECT COUNT(*) AS customers FROM customers"));
+    const original = fake.answer;
+    fake.answer = "";
+    try {
+      const events = await run("How many customers are there?");
+      expect(find(events, "message_failed")).toBeUndefined();
+      expect(find(events, "message_completed")?.content).toMatch(/1 matching row/);
+    } finally {
+      fake.answer = original;
+    }
+  });
+
   it("treats a question that starts with a greeting as a data question", async () => {
     script(SqlDraftSchema, draft("SELECT COUNT(*) AS customers FROM customers WHERE strftime('%Y', signup_date) = '2024'"));
     const events = await run("hi, how many customers signed up in 2024?");
@@ -295,15 +308,23 @@ describe("agent graph", () => {
     async function withFirecrawl<T>(body: () => Promise<T>, responses: Record<string, unknown> = {}) {
       process.env.FIRECRAWL_API_URL = "https://fc.test";
       process.env.FIRECRAWL_API_KEY = "test-key";
+      // Search returns titles; each page is then read with its own scrape call.
+      const pages = new Map<string, string>();
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-        if (!String(input).startsWith("https://fc.test/")) throw new Error(`Unexpected fetch: ${String(input)}`);
-        const query = JSON.parse(String(init?.body)).query as string;
-        return new Response(JSON.stringify(responses[query] ?? searchResponse));
+        const url = String(input);
+        const body = JSON.parse(String(init?.body));
+        if (url === "https://fc.test/v2/scrape") {
+          return new Response(JSON.stringify({ success: true, data: { markdown: pages.get(body.url) ?? "" } }));
+        }
+        if (url !== "https://fc.test/v2/search") throw new Error(`Unexpected fetch: ${url}`);
+        const reply = (responses[body.query] ?? searchResponse) as { data: { web: Array<{ url: string; markdown?: string }> } };
+        for (const item of reply.data.web) pages.set(item.url, item.markdown ?? "");
+        return new Response(JSON.stringify(reply));
       });
       try {
         const result = await body();
-        // Copied: mockRestore below clears the recorded calls.
-        return { result, calls: [...fetchSpy.mock.calls] };
+        // Copied: mockRestore below clears the recorded calls. Only searches count.
+        return { result, calls: fetchSpy.mock.calls.filter((call) => String(call[0]).endsWith("/v2/search")) };
       } finally {
         fetchSpy.mockRestore();
         delete process.env.FIRECRAWL_API_URL;

@@ -7,9 +7,11 @@
 
 export type WebSource = { title: string; url: string; content: string };
 
-/** Results asked for per search; unusable pages are dropped from these. */
+/** Results asked for per search. */
 const RESULTS = 8;
-/** Usable pages kept per search. */
+/** Pages scraped per search, in result order; the rest keep their snippet. */
+const SCRAPE = 6;
+/** Sources kept per search. */
 const KEEP = 4;
 /** Shorter page text is a stub, a login wall or an error page. */
 const MIN_CONTENT_CHARS = 300;
@@ -17,18 +19,19 @@ const MIN_CONTENT_CHARS = 300;
 const MIN_SNIPPET_CHARS = 40;
 /** Page text kept per result: enough for the facts, small enough for the prompt. */
 const MAX_CONTENT_CHARS = 4000;
-// Firecrawl gives up on slow pages at SEARCH_TIMEOUT_MS; ours only guards a hung server.
-const SEARCH_TIMEOUT_MS = 25_000;
-const TIMEOUT_MS = 40_000;
+const SEARCH_TIMEOUT_MS = 20_000;
+// Firecrawl gives up on a slow page at PAGE_TIMEOUT_MS; ours only guards a hung server.
+const PAGE_TIMEOUT_MS = 15_000;
+const PAGE_FETCH_TIMEOUT_MS = 25_000;
 
 export function webSearchConfigured(): boolean {
   return Boolean(process.env.FIRECRAWL_API_URL?.trim() && process.env.FIRECRAWL_API_KEY?.trim());
 }
 
-export async function searchWeb(query: string, signal?: AbortSignal): Promise<WebSource[]> {
+async function firecrawl<T>(path: string, body: unknown, timeoutMs: number, signal?: AbortSignal): Promise<T> {
   const base = process.env.FIRECRAWL_API_URL!.trim().replace(/\/+$/, "");
-  const timeout = AbortSignal.timeout(TIMEOUT_MS);
-  const response = await fetch(`${base}/v2/search`, {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const response = await fetch(`${base}${path}`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${process.env.FIRECRAWL_API_KEY!.trim()}`,
@@ -36,33 +39,55 @@ export async function searchWeb(query: string, signal?: AbortSignal): Promise<We
       // Cloudflare in front of the server rejects clients without a user agent.
       "user-agent": "kakaw-agent/1.0",
     },
-    body: JSON.stringify({
-      query,
-      limit: RESULTS,
-      timeout: SEARCH_TIMEOUT_MS,
-      scrapeOptions: { formats: ["markdown"], onlyMainContent: true },
-    }),
+    body: JSON.stringify(body),
     signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
   });
   if (!response.ok) {
-    throw new Error(`Web search failed with HTTP ${response.status}.`);
+    throw new Error(`Firecrawl ${path} failed with HTTP ${response.status}.`);
   }
+  return (await response.json()) as T;
+}
 
-  const payload = (await response.json()) as {
-    data?: { web?: Array<{ url?: string; title?: string; description?: string; markdown?: string }> };
-  };
+/**
+ * Searches, then reads the top pages one request each.
+ *
+ * Asking the search endpoint to scrape as well returned no results at all
+ * whenever one page was slow, so the two are split: the search alone is fast
+ * and reliable, and a page that fails only falls back to its own snippet.
+ */
+export async function searchWeb(query: string, signal?: AbortSignal): Promise<WebSource[]> {
+  const payload = await firecrawl<{ data?: { web?: Array<{ url?: string; title?: string; description?: string }> } }>(
+    "/v2/search",
+    { query, limit: RESULTS },
+    SEARCH_TIMEOUT_MS,
+    signal,
+  );
+  const results = (payload.data?.web ?? []).filter((item) => typeof item.url === "string" && /^https?:\/\//.test(item.url));
+
+  const pages = await Promise.allSettled(
+    results.slice(0, SCRAPE).map((item) =>
+      firecrawl<{ data?: { markdown?: string } }>(
+        "/v2/scrape",
+        { url: item.url, formats: ["markdown"], onlyMainContent: true, timeout: PAGE_TIMEOUT_MS },
+        PAGE_FETCH_TIMEOUT_MS,
+        signal,
+      ),
+    ),
+  );
+  if (signal?.aborted) throw signal.reason;
+
   const terms = searchTerms(query);
-  return (payload.data?.web ?? [])
-    .filter((item) => typeof item.url === "string" && /^https?:\/\//.test(item.url))
-    .flatMap((item) => {
+  return results
+    .flatMap((item, index) => {
       const title = item.title?.trim() || item.url!;
-      const page = cleanPage(item.markdown ?? "");
+      const scraped = pages[index];
+      const page = cleanPage(scraped?.status === "fulfilled" ? (scraped.value.data?.markdown ?? "") : "");
       if (isUsablePage(page)) {
         return [{ title, url: item.url!, content: selectRelevant(page, terms, MAX_CONTENT_CHARS) }];
       }
-      // The page itself is gated (a consent or login wall, which every YouTube
-      // page is from our server's region), but the search engine's own title
-      // and snippet for it are real and often hold the answer.
+      // The page could not be read (a consent, login or age wall, or it timed
+      // out), but the search engine's own title and snippet for it are real
+      // and often hold the answer.
       const snippet = item.description?.trim() ?? "";
       if (snippet.length >= MIN_SNIPPET_CHARS || terms.some((term) => title.toLowerCase().includes(term))) {
         return [{ title, url: item.url!, content: `Search result only (the page itself could not be read). Title: ${title}. Snippet: ${snippet || "(none)"}` }];
