@@ -1,4 +1,4 @@
-import { WEB_QUERY_RULES } from "../agent/web.js";
+import { WEB_QUERY_RULES, WEB_WHERE_TO_LOOK } from "../agent/web.js";
 import { webSearchConfigured } from "../net/web-search.js";
 import type { DatabaseKnowledgeRuntime } from "../types.js";
 
@@ -40,6 +40,7 @@ export class VerifyPromptBuilder {
           ? [
               "Separately, decide whether to also search the web. Set needsWeb to true when this result, even if the query is right, is not enough to answer confidently: the question asks for something newer than or outside what the database stores (online, latest, current, public facts about a person, company or product); the result is empty but the answer likely exists publicly; or the rows hold conflicting values for the same thing that public sources could settle. Then write webQuery, a short search query.",
               WEB_QUERY_RULES,
+              WEB_WHERE_TO_LOOK,
               "Otherwise set needsWeb to false and leave webQuery empty.",
             ]
           : ["Always set needsWeb to false and webQuery empty."]),

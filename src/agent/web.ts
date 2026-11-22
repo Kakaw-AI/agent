@@ -61,3 +61,17 @@ export function planWebQuery(needsWeb: unknown, raw: unknown, request: AgentRunR
 /** The prompt rules for writing a search query, shared by the draft and the review. */
 export const WEB_QUERY_RULES =
   "webQuery may use names and terms the user typed or clearly referred to (e.g. 'her latest video' right after an answer naming one person means that person). It must NEVER add a value the user did not ask about: no other names, IDs, amounts or emails taken from this database or from earlier results. E.g. if the user asked about 'Acme Corp', 'Acme Corp latest news' is fine; never search for a customer the user did not name or point to.";
+
+/**
+ * Where to look. The database says what world the user works in, and the same
+ * question ("her latest video") is answered on different sites in each.
+ */
+export const WEB_WHERE_TO_LOOK =
+  "Write webQuery for where this kind of information is actually published, judged from what this database is about. Name the specialist sites and databases of that field in the query when it helps: films (IMDb, the studio), music (Discogs, the label), software (GitHub, the docs), companies (the official site, filings), adult-film performers and scenes (IAFD, Data18, the studio's own site, the performer's official links); a mainstream platform that would not host the content (e.g. YouTube for adult films) is the wrong place. Use the most specific name the user gave or pointed to, e.g. a performer's stage name or a studio.";
+
+/** What the database is about, for steps that do not see the schema. */
+export function databaseContext(request: AgentRunRequest): string {
+  const tables = request.knowledge.tables.map((table) => table.name).slice(0, 60).join(", ");
+  return [request.knowledge.summary, tables && `Tables: ${tables}`].filter(Boolean).join("\n");
+}
+

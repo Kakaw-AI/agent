@@ -13,6 +13,8 @@ const RESULTS = 8;
 const KEEP = 4;
 /** Shorter page text is a stub, a login wall or an error page. */
 const MIN_CONTENT_CHARS = 300;
+/** A search snippet shorter than this says nothing on its own. */
+const MIN_SNIPPET_CHARS = 40;
 /** Page text kept per result: enough for the facts, small enough for the prompt. */
 const MAX_CONTENT_CHARS = 4000;
 // Firecrawl gives up on slow pages at SEARCH_TIMEOUT_MS; ours only guards a hung server.
@@ -49,15 +51,76 @@ export async function searchWeb(query: string, signal?: AbortSignal): Promise<We
   const payload = (await response.json()) as {
     data?: { web?: Array<{ url?: string; title?: string; description?: string; markdown?: string }> };
   };
+  const terms = searchTerms(query);
   return (payload.data?.web ?? [])
     .filter((item) => typeof item.url === "string" && /^https?:\/\//.test(item.url))
-    .map((item) => ({
-      title: item.title?.trim() || item.url!,
-      url: item.url!,
-      content: (item.markdown?.trim() || item.description?.trim() || "").slice(0, MAX_CONTENT_CHARS),
-    }))
-    .filter((source) => isUsablePage(source.content))
+    .flatMap((item) => {
+      const title = item.title?.trim() || item.url!;
+      const page = cleanPage(item.markdown ?? "");
+      if (isUsablePage(page)) {
+        return [{ title, url: item.url!, content: selectRelevant(page, terms, MAX_CONTENT_CHARS) }];
+      }
+      // The page itself is gated (a consent or login wall, which every YouTube
+      // page is from our server's region), but the search engine's own title
+      // and snippet for it are real and often hold the answer.
+      const snippet = item.description?.trim() ?? "";
+      if (snippet.length >= MIN_SNIPPET_CHARS || terms.some((term) => title.toLowerCase().includes(term))) {
+        return [{ title, url: item.url!, content: `Search result only (the page itself could not be read). Title: ${title}. Snippet: ${snippet || "(none)"}` }];
+      }
+      return [];
+    })
     .slice(0, KEEP);
+}
+
+/** Lowercase words of the query worth matching against page text. */
+function searchTerms(query: string): string[] {
+  return [...new Set(query.toLowerCase().replace(/site:\S+/g, " ").match(/[\p{L}\p{N}]{3,}/gu) ?? [])];
+}
+
+const wordCount = (line: string) => line.split(/\s+/).filter(Boolean).length;
+
+/**
+ * Page text without navigation: language pickers, menu items, image-only and
+ * link-only lines. What is left is prose, headings and lines carrying numbers
+ * or dates (a video list: "New video title · 3 days ago").
+ */
+export function cleanPage(markdown: string): string {
+  return markdown
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => {
+      if (!line || /^!\[[^\]]*\]\([^)]*\)$/.test(line)) return false;
+      const text = line.replace(/^[*\-+#>\d.\s]+/, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").trim();
+      if (!text) return false;
+      if (/^#{1,6}\s/.test(line)) return true;
+      return wordCount(text) >= 5 || (wordCount(text) >= 2 && /\d/.test(text));
+    })
+    .join("\n");
+}
+
+/**
+ * Up to `max` characters of the page, preferring lines that mention the search
+ * terms over the page's first lines, kept in page order. A long page's answer
+ * is rarely in its first few thousand characters.
+ */
+export function selectRelevant(text: string, terms: string[], max: number): string {
+  if (text.length <= max) return text;
+  const lines = text.split("\n");
+  const score = (line: string) => {
+    const lower = line.toLowerCase();
+    return terms.reduce((sum, term) => sum + (lower.includes(term) ? 1 : 0), 0);
+  };
+  const ranked = lines
+    .map((line, index) => ({ index, score: score(line) + (index < 3 ? 0.5 : 0) }))
+    .sort((left, right) => right.score - left.score || left.index - right.index);
+  const picked = new Set<number>();
+  let size = 0;
+  for (const { index } of ranked) {
+    if (size + lines[index].length + 1 > max) continue;
+    picked.add(index);
+    size += lines[index].length + 1;
+  }
+  return lines.filter((_, index) => picked.has(index)).join("\n");
 }
 
 // Pages that are only a gate in front of the content.
@@ -68,12 +131,15 @@ const GATE_PATTERNS = [
   /consent\.(youtube|google)\.com/i,
   /log ?in to (see|continue|view)/i,
   /sign ?in to (see|continue|view)/i,
+  /melde dich an|anmelden|ein google-unternehmen/i,
   /enable javascript/i,
+  // Adult and age-restricted sites put an age check in front of every page.
+  /adults only|age[- ]restricted|at least 18 years|age of majority|are you (over )?18|i am (over )?18|age verification/i,
   /verify (that )?you are (a )?human/i,
   /access denied/i,
 ];
 
-/** False for stubs, cookie and consent walls, login walls and bot checks. */
+/** False for stubs, cookie and consent walls, login walls and bot checks. Pass text through cleanPage first. */
 export function isUsablePage(content: string): boolean {
   const text = content.trim();
   if (text.length < MIN_CONTENT_CHARS) return false;

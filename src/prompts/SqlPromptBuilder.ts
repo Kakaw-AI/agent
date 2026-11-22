@@ -3,7 +3,7 @@ import type { DatabaseCatalogTable, DatabaseKnowledgeRuntime } from "../types.js
 import { getRequiredVisualizationFields } from "../graph/visualization.js";
 import type { SqlPromptBuildInput, SqlPromptOptions } from "../graph/types.js";
 import { webSearchConfigured } from "../net/web-search.js";
-import { WEB_QUERY_RULES } from "../agent/web.js";
+import { WEB_QUERY_RULES, WEB_WHERE_TO_LOOK } from "../agent/web.js";
 
 const OUTPUT_INSTRUCTIONS = [
   "Return JSON with these fields: needsClarification (boolean), clarifyingQuestion (string), options (list of strings), sql (string), rationale (string), needsWeb (boolean), webQuery (string).",
@@ -19,6 +19,7 @@ function webInstructions(): string[] {
   return [
     "WEB SEARCH: set needsWeb to true when answering needs facts that are not in this database or are newer than it: anything the user asks about 'online', 'on the internet', 'latest' or 'current' beyond what the database stores, public facts about a person, company or product, industry benchmarks, market prices, exchange rates, public statistics, definitions, news. Then write webQuery: a short search query.",
     WEB_QUERY_RULES,
+    WEB_WHERE_TO_LOOK,
     "If the question needs both the database and the web (e.g. comparing our churn to the industry average), write the SQL AND set needsWeb with webQuery. If it needs only the web, leave sql empty. If the database alone answers it, set needsWeb to false and leave webQuery empty.",
   ];
 }

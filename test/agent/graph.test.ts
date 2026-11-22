@@ -400,7 +400,10 @@ describe("agent graph", () => {
         "Globex latest launch",
         "Globex official site new product 2026",
       ]);
+      // Gated pages stay as title-and-snippet sources: their titles name what was asked about.
       expect(find(events, "web_sources")?.sources.map((source: any) => source.url)).toEqual([
+        "https://youtube.com/globex",
+        "https://instagram.com/globex",
         "https://example.com/globex-news",
         "https://globex.example/launch",
       ]);
