@@ -446,6 +446,19 @@ describe("agent graph", () => {
       expect(find(events, "web_sources")?.sources.map((source: any) => source.url)).toEqual(["https://globex.example/launch"]);
     });
 
+    it("drops results whose link has no host", async () => {
+      script(SqlDraftSchema, draft("", "", "Globex latest launch"));
+      const responses = {
+        "Globex latest launch": {
+          success: true,
+          data: { web: [page("http:///go/v1/AbAjSvIRY", "Globex mirror"), page("https://globex.example/launch", "Globex launches Widget 3")] },
+        },
+      };
+      const { result: events } = await withFirecrawl(() => run("What did Globex launch most recently?"), responses);
+
+      expect(find(events, "web_sources")?.sources.map((source: any) => source.url)).toEqual(["https://globex.example/launch"]);
+    });
+
     it("never searches when the server is not configured", async () => {
       script(SqlDraftSchema, draft("SELECT COUNT(*) AS customers FROM customers", "", "average customers per SaaS company"));
       const events = await run("How does our customer count compare to a typical SaaS?");

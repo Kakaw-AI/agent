@@ -101,7 +101,17 @@ async function searchResults(query: string, signal?: AbortSignal) {
     SEARCH_TIMEOUT_MS,
     signal,
   );
-  return (payload.data?.web ?? []).filter((item) => typeof item.url === "string" && /^https?:\/\//.test(item.url));
+  return (payload.data?.web ?? []).filter((item) => typeof item.url === "string" && isWebUrl(item.url));
+}
+
+/** Some engines return redirect links without a host ("http:///go/v1/..."): unreadable and useless as a citation. */
+function isWebUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (url.protocol === "http:" || url.protocol === "https:") && url.hostname.includes(".");
+  } catch {
+    return false;
+  }
 }
 
 /** Lowercase words of the query worth matching against page text. */
