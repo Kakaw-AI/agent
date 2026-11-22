@@ -43,6 +43,12 @@ export const TitleSchema = z.object({
   title: z.string(),
 });
 
+/** Whether web results so far answer the question, and what to search next if not. */
+export const WebCheckSchema = z.object({
+  enough: z.boolean(),
+  nextQuery: z.string(),
+});
+
 export const ChartPlanSchema = z.object({
   kind: z.enum(["bar", "line", "pie", "scatter", "histogram"]),
   title: z.string(),

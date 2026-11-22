@@ -8,7 +8,9 @@ import { AnswerPromptBuilder } from "../prompts/AnswerPromptBuilder.js";
 import { ChartPlanPromptBuilder } from "../prompts/ChartPlanPromptBuilder.js";
 import { SuggestionsPromptBuilder } from "../prompts/SuggestionsPromptBuilder.js";
 import { WebAnswerPromptBuilder } from "../prompts/WebAnswerPromptBuilder.js";
-import { searchWeb, type WebSource } from "../net/web-search.js";
+import type { WebSource } from "../net/web-search.js";
+import { researchWeb } from "./web-research.js";
+import { mergeTokenUsage } from "../utils/token.js";
 import type {
   AgentRunRequest,
   AgentStreamEvent,
@@ -61,15 +63,13 @@ export async function answer(state: State, config: NodeConfig): Promise<Update> 
   const steps: Array<{ text: string; at: string }> = [];
   const toolCalls: Array<Record<string, unknown>> = [];
   let sources: WebSource[] = [];
+  let researchUsage = null as Awaited<ReturnType<typeof researchWeb>>["tokenUsage"];
   if (state.webQuery) {
-    steps.push(step(`Searching the web for "${state.webQuery}"...`));
-    try {
-      sources = await searchWeb(state.webQuery, signal);
-      toolCalls.push({ tool: "web_search", query: state.webQuery, results: sources.length });
-    } catch (error) {
-      if (signal?.aborted) throw error;
-      toolCalls.push({ tool: "web_search", query: state.webQuery, error: error instanceof Error ? error.message : String(error) });
-    }
+    const research = await researchWeb({ request, question: state.question, firstQuery: state.webQuery, step, signal, hooks });
+    sources = research.sources;
+    steps.push(...research.steps);
+    toolCalls.push(...research.toolCalls);
+    researchUsage = research.tokenUsage;
     if (sources.length > 0) {
       emit({ type: "web_sources", data: { sources: sources.map(({ title, url }) => ({ title, url })) } });
     }
@@ -94,7 +94,7 @@ export async function answer(state: State, config: NodeConfig): Promise<Update> 
       ...hooks,
       onDelta: (delta) => emit({ type: "message_delta", data: { messageId: request.messageId, delta } }),
     });
-    return { answer: content, tokenUsage, steps, toolCalls, webSources: sources };
+    return { answer: content, tokenUsage: mergeTokenUsage(researchUsage, tokenUsage), steps, toolCalls, webSources: sources };
   }
 
   if (state.rows.length === 0) {
@@ -103,6 +103,7 @@ export async function answer(state: State, config: NodeConfig): Promise<Update> 
         answer: "I couldn't find this on the web just now, and it isn't something your database can answer. Please try again or rephrase the question.",
         steps: [...steps, step("The web search returned nothing usable.")],
         toolCalls,
+        tokenUsage: researchUsage,
       };
     }
     return {

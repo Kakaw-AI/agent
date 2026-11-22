@@ -39,7 +39,7 @@ vi.mock("../../src/llm/langchain.js", async (importOriginal) => {
 });
 
 const { streamAgent } = await import("../../src/agent/graph.js");
-const { RouteSchema, SqlDraftSchema, SuggestionsSchema, VerifySchema, ChartPlanSchema } = await import("../../src/llm/schemas.js");
+const { RouteSchema, SqlDraftSchema, SuggestionsSchema, VerifySchema, ChartPlanSchema, WebCheckSchema } = await import("../../src/llm/schemas.js");
 const { clearPlanCache } = await import("../../src/llm/cache.js");
 const { syncDatabase } = await import("../../src/database/knowledge.js");
 const { cacheFilePath } = await import("../../src/database/materialize.js");
@@ -84,6 +84,7 @@ beforeEach(() => {
   fake.defaults.set(VerifySchema, () => ({ answersQuestion: true, problem: "" }));
   fake.defaults.set(SuggestionsSchema, () => ({ suggestions: ["One?", "Two?", "Three?"] }));
   fake.defaults.set(ChartPlanSchema, () => ({ kind: "bar", title: "", xField: "missing", yField: "missing" }));
+  fake.defaults.set(WebCheckSchema, () => ({ enough: true, nextQuery: "" }));
 });
 
 function script(schema: unknown, ...replies: unknown[]) {
@@ -286,17 +287,18 @@ describe("agent graph", () => {
   });
 
   describe("web search", () => {
-    const searchResponse = {
-      success: true,
-      data: { web: [{ url: "https://example.com/churn", title: "SaaS churn benchmarks", markdown: "Average monthly churn is 3.5%." }] },
-    };
+    const article = "Average monthly churn for B2B SaaS is 3.5%, and annual churn sits near 35%. ".repeat(6);
+    const page = (url: string, title: string, markdown = article) => ({ url, title, markdown });
+    const searchResponse = { success: true, data: { web: [page("https://example.com/churn", "SaaS churn benchmarks")] } };
 
-    async function withFirecrawl<T>(body: () => Promise<T>) {
+    /** `responses` maps a search query to its results; any other query gets `searchResponse`. */
+    async function withFirecrawl<T>(body: () => Promise<T>, responses: Record<string, unknown> = {}) {
       process.env.FIRECRAWL_API_URL = "https://fc.test";
       process.env.FIRECRAWL_API_KEY = "test-key";
-      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-        if (String(input).startsWith("https://fc.test/")) return new Response(JSON.stringify(searchResponse));
-        throw new Error(`Unexpected fetch: ${String(input)}`);
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        if (!String(input).startsWith("https://fc.test/")) throw new Error(`Unexpected fetch: ${String(input)}`);
+        const query = JSON.parse(String(init?.body)).query as string;
+        return new Response(JSON.stringify(responses[query] ?? searchResponse));
       });
       try {
         const result = await body();
@@ -373,6 +375,35 @@ describe("agent graph", () => {
 
       expect(calls).toHaveLength(0);
       expect(trace(events).toolCalls.find((call: any) => call.tool === "verification")?.webSearchDropped).toBe(`${name} net worth`);
+    });
+
+    it("skips gate pages and searches again until the results answer the question", async () => {
+      script(SqlDraftSchema, draft("", "", "Globex latest launch"));
+      script(WebCheckSchema, { enough: false, nextQuery: "Globex official site new product 2026" }, { enough: true, nextQuery: "" });
+      const consent = "Before you continue to YouTube. We use cookies and data to deliver and maintain Google services. ".repeat(4);
+      const responses = {
+        "Globex latest launch": {
+          success: true,
+          data: {
+            web: [
+              page("https://youtube.com/globex", "Globex - YouTube", consent),
+              page("https://instagram.com/globex", "Globex (@globex)", "120 posts"),
+              page("https://example.com/globex-news", "Globex news"),
+            ],
+          },
+        },
+        "Globex official site new product 2026": { success: true, data: { web: [page("https://globex.example/launch", "Globex launches Widget 3")] } },
+      };
+      const { result: events, calls } = await withFirecrawl(() => run("What did Globex launch most recently?"), responses);
+
+      expect(calls.map((call) => JSON.parse(String(call[1]?.body)).query)).toEqual([
+        "Globex latest launch",
+        "Globex official site new product 2026",
+      ]);
+      expect(find(events, "web_sources")?.sources.map((source: any) => source.url)).toEqual([
+        "https://example.com/globex-news",
+        "https://globex.example/launch",
+      ]);
     });
 
     it("never searches when the server is not configured", async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { leaksDatabaseValues, userTypedText } from "../../src/agent/web.js";
+import { isUsablePage } from "../../src/net/web-search.js";
 
 describe("leaksDatabaseValues", () => {
   const values = new Set(["acme corp", "jane.doe@example.com", "asia pacific"]);
@@ -31,3 +32,15 @@ describe("userTypedText", () => {
     expect(text).not.toContain("customer since");
   });
 });
+
+describe("isUsablePage", () => {
+  it("drops stubs and cookie or login walls", () => {
+    expect(isUsablePage("120 posts")).toBe(false);
+    expect(isUsablePage("Before you continue to YouTube. We use cookies to deliver Google services. ".repeat(4))).toBe(false);
+  });
+
+  it("keeps a long article that mentions cookies in its footer", () => {
+    expect(isUsablePage("Real article text about churn benchmarks. ".repeat(60) + "We use cookies.")).toBe(true);
+  });
+});
+
