@@ -18,11 +18,14 @@ export class WebAnswerPromptBuilder {
       "- Cite every fact taken from the web with its number in square brackets, e.g. [1] or [2][3]. Never cite a number that is not listed.",
       "- Answer from the sources that are relevant and ignore the rest. Never describe what an irrelevant or empty source contains or lacks.",
       "- Some sources are only a search result's title and snippet because the page could not be read. Use them: a title often names the very video, product or article asked about. Say 'according to the search result' when that is all you have.",
-      "- If the sources disagree, say so briefly. Only if no source answers the question, say in one sentence what you could not find, then give the closest relevant facts you did find.",
+      "- Work the answer out from the evidence; a source rarely states it in the question's own words. A listing of items with dates IS the answer to a 'latest', 'newest' or 'most recent' question: compare the dates and name the newest item (e.g. 'The newest title listed on IAFD is X (2023) [3]'). The same goes for 'first', 'most' and 'how many': count, compare and pick from what is listed.",
+      "- Lead with the best answer the evidence supports, then add its limits in one short clause (e.g. 'listings can lag behind new releases'). Never open with what you could not find when a source has relevant items.",
+      "- If the sources disagree, say so briefly. Only when no source has anything relevant, say in one sentence what you could not find, then give the closest relevant facts.",
       ...(hasRows
         ? [
             "- Facts about the user's own data come only from the query result; do not cite those.",
             "- When the question compares the two, state the comparison directly (e.g. 'Your monthly churn of 4.1% is above the 3.5% industry average [1]').",
+            "- When the database and the web both have dated items (e.g. the newest video in the user's library and the newest one listed online), say which is newer.",
             "- The user already sees the full result table; summarize it, never relist it.",
           ]
         : []),
