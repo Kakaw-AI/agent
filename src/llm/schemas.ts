@@ -17,6 +17,9 @@ export const SqlDraftSchema = z.object({
   options: z.array(z.string()),
   sql: z.string(),
   rationale: z.string(),
+  /** Outside facts are needed (benchmarks, definitions, current events); searched with webQuery. */
+  needsWeb: z.boolean(),
+  webQuery: z.string(),
 });
 
 /** A second look at an executed result before it is shown. */

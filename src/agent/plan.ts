@@ -8,6 +8,8 @@ import { SqlDraftSchema } from "../llm/schemas.js";
 import { PostgresSqlPromptBuilder } from "../prompts/database/PostgresSqlPromptBuilder.js";
 import { SqliteSqlPromptBuilder } from "../prompts/database/SqliteSqlPromptBuilder.js";
 import { VisualizationSqlUserPromptBuilder } from "../prompts/VisualizationSqlUserPromptBuilder.js";
+import { webSearchConfigured } from "../net/web-search.js";
+import { databaseValues, leaksDatabaseValues } from "./web.js";
 import { type NodeConfig, runtime, type SqlFeedback, type State, type Update } from "./state.js";
 
 /** SQL drafts the model may write in one run: the first plus three repairs. */
@@ -19,6 +21,16 @@ export const MAX_GENERATIONS = 4;
  * error, empty result, failed check) goes through here, so the budget is
  * enforced in one place.
  */
+/**
+ * The search to run, or "" for none. A query carrying values from the user's
+ * database is dropped: the search engine is a third party.
+ */
+function planWebQuery(needsWeb: boolean, raw: string, message: string, request: Parameters<typeof databaseValues>[0]): string {
+  const query = raw.trim().slice(0, 200);
+  if (!needsWeb || !query || !webSearchConfigured()) return "";
+  return leaksDatabaseValues(query, message, databaseValues(request)) ? "" : query;
+}
+
 export function retryOrGiveUp(
   state: State,
   feedback: SqlFeedback,
@@ -181,12 +193,20 @@ export async function generate(state: State, config: NodeConfig) {
   }
 
   const sql = value.sql.trim();
-  const update: Update = {
-    generations,
-    tokenUsage,
-    steps,
-    toolCalls: [{ tool: "sql_generation", sql, rationale: value.rationale }],
-  };
+  // A repair keeps the search the first draft asked for.
+  // Small models sometimes drop fields they were told to return.
+  const rawWebQuery = typeof value.webQuery === "string" ? value.webQuery : "";
+  const webQuery = planWebQuery(value.needsWeb === true, rawWebQuery, request.message, request) || state.webQuery;
+  const toolCalls: Array<Record<string, unknown>> = [{ tool: "sql_generation", sql, rationale: value.rationale }];
+  if (value.needsWeb === true && rawWebQuery.trim() && !webQuery) {
+    toolCalls.push({ tool: "web_search", dropped: "query contained database values" });
+  }
+  const update: Update = { generations, tokenUsage, steps, toolCalls, ...(webQuery ? { webQuery } : {}) };
+
+  // Outside facts only: nothing to run against the database.
+  if (!sql && webQuery) {
+    return new Command({ goto: "accept", update: { ...update, sql: "", feedback: null } });
+  }
 
   if (!sql) {
     return retryOrGiveUp(

@@ -7,6 +7,8 @@ import { ChartPlanSchema, SuggestionsSchema } from "../llm/schemas.js";
 import { AnswerPromptBuilder } from "../prompts/AnswerPromptBuilder.js";
 import { ChartPlanPromptBuilder } from "../prompts/ChartPlanPromptBuilder.js";
 import { SuggestionsPromptBuilder } from "../prompts/SuggestionsPromptBuilder.js";
+import { WebAnswerPromptBuilder } from "../prompts/WebAnswerPromptBuilder.js";
+import { searchWeb, type WebSource } from "../net/web-search.js";
 import type {
   AgentRunRequest,
   AgentStreamEvent,
@@ -39,8 +41,10 @@ export async function accept(state: State, config: NodeConfig): Promise<Update> 
     published: true,
     // The query that produced the answer. Recorded here and only here, so
     // query memory never learns from an attempt that was later rejected.
+    // A web-assisted answer is not reusable from the SQL alone, so query memory
+    // does not learn it either.
     toolCalls:
-      state.kind === "chart_previous" || !state.sql
+      state.kind === "chart_previous" || !state.sql || state.webQuery
         ? []
         : [{ tool: "sql_execution", sql: state.sql, rowCount: state.rowCount }],
   };
@@ -54,14 +58,61 @@ export async function answer(state: State, config: NodeConfig): Promise<Update> 
     return {};
   }
 
+  const steps: Array<{ text: string; at: string }> = [];
+  const toolCalls: Array<Record<string, unknown>> = [];
+  let sources: WebSource[] = [];
+  if (state.webQuery) {
+    steps.push(step(`Searching the web for "${state.webQuery}"...`));
+    try {
+      sources = await searchWeb(state.webQuery, signal);
+      toolCalls.push({ tool: "web_search", query: state.webQuery, results: sources.length });
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      toolCalls.push({ tool: "web_search", query: state.webQuery, error: error instanceof Error ? error.message : String(error) });
+    }
+    if (sources.length > 0) {
+      emit({ type: "web_sources", data: { sources: sources.map(({ title, url }) => ({ title, url })) } });
+    }
+  }
+
+  if (sources.length > 0) {
+    steps.push(step(state.rows.length > 0 ? "Writing the response from query and web results..." : "Writing the response from web results..."));
+    const { content, tokenUsage } = await invokeStream({
+      llm: request.llm,
+      ...new WebAnswerPromptBuilder().build({
+        question: state.question,
+        columns: state.columns,
+        rows: state.rows,
+        rowCount: state.rowCount,
+        sources,
+      }),
+      history: request.history,
+      name: "write_web_answer",
+      light: true,
+      temperature: 0.2,
+      signal,
+      ...hooks,
+      onDelta: (delta) => emit({ type: "message_delta", data: { messageId: request.messageId, delta } }),
+    });
+    return { answer: content, tokenUsage, steps, toolCalls, webSources: sources };
+  }
+
   if (state.rows.length === 0) {
+    if (!state.sql) {
+      return {
+        answer: "I couldn't find this on the web just now, and it isn't something your database can answer. Please try again or rephrase the question.",
+        steps: [...steps, step("The web search returned nothing usable.")],
+        toolCalls,
+      };
+    }
     return {
       answer: buildNoRowsAnswer({ question: state.question, sql: state.sql }),
-      steps: [step("The query completed, but no matching rows were found.")],
+      steps: [...steps, step("The query completed, but no matching rows were found.")],
+      toolCalls,
     };
   }
 
-  const steps = [step("Writing the response from query results...")];
+  steps.push(step("Writing the response from query results..."));
   const { content, tokenUsage } = await invokeStream({
     llm: request.llm,
     ...new AnswerPromptBuilder().build({
@@ -79,7 +130,7 @@ export async function answer(state: State, config: NodeConfig): Promise<Update> 
     onDelta: (delta) => emit({ type: "message_delta", data: { messageId: request.messageId, delta } }),
   });
 
-  return { answer: content, tokenUsage, steps };
+  return { answer: content, tokenUsage, steps, toolCalls };
 }
 
 export async function chart(state: State, config: NodeConfig): Promise<Update> {
@@ -329,6 +380,7 @@ export async function finalize(state: State, config: NodeConfig): Promise<Update
     !state.sqlFromCache &&
     !state.errorMessage &&
     !state.clarification &&
+    !state.webQuery &&
     state.sql &&
     state.answer
   ) {

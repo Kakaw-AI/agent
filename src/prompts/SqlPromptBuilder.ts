@@ -2,12 +2,25 @@ import { renderCatalogLine } from "../database/catalog-render.js";
 import type { DatabaseCatalogTable, DatabaseKnowledgeRuntime } from "../types.js";
 import { getRequiredVisualizationFields } from "../graph/visualization.js";
 import type { SqlPromptBuildInput, SqlPromptOptions } from "../graph/types.js";
+import { webSearchConfigured } from "../net/web-search.js";
 
 const OUTPUT_INSTRUCTIONS = [
-  "Return JSON with these fields: needsClarification (boolean), clarifyingQuestion (string), options (list of strings), sql (string), rationale (string).",
+  "Return JSON with these fields: needsClarification (boolean), clarifyingQuestion (string), options (list of strings), sql (string), rationale (string), needsWeb (boolean), webQuery (string).",
   "Ask for clarification only when the question cannot be answered without a choice the user has to make, and neither the conversation nor the catalog settles it. Example: 'who are our best customers?' when best could mean most spent, most orders or most recent. Then set needsClarification to true, write one short clarifyingQuestion, give 2 to 4 short options phrased as complete questions the user could send, and leave sql empty.",
   "Otherwise set needsClarification to false, leave clarifyingQuestion empty and options empty, and write the SQL. Prefer answering: when one reading is clearly the usual one, use it and state the assumption in the rationale.",
 ];
+
+// Decided once per process, so the system prompt stays byte-identical and cacheable.
+function webInstructions(): string[] {
+  if (!webSearchConfigured()) {
+    return ["Always set needsWeb to false and webQuery empty."];
+  }
+  return [
+    "WEB SEARCH: set needsWeb to true only when answering needs facts that are not in this database and change over time or come from outside it: industry benchmarks, market prices, exchange rates, public statistics, definitions, news. Then write webQuery: a short, generic search query in English.",
+    "webQuery must NEVER contain names, IDs, amounts, emails or any other value from this database or from earlier results. Search for the outside fact only, e.g. 'average SaaS churn rate 2026', never a customer or product name taken from the data.",
+    "If the question needs both the database and the web (e.g. comparing our churn to the industry average), write the SQL AND set needsWeb with webQuery. If it needs only the web, leave sql empty. If the database alone answers it, set needsWeb to false and leave webQuery empty.",
+  ];
+}
 
 export abstract class BaseSqlPromptBuilder {
   protected abstract buildDialectInstructions(): string[];
@@ -62,6 +75,7 @@ export abstract class BaseSqlPromptBuilder {
       "When you filter on a text column, use a value exactly as it appears in the catalog examples (same spelling and case). If the example values do not include the one you need, match case-insensitively.",
       "Earlier turns of the conversation include the SQL they ran. For a follow-up, start from that SQL and change only what the new question changes.",
       ...OUTPUT_INSTRUCTIONS,
+      ...webInstructions(),
       `Knowledge summary: ${knowledge.summary || "No summary available."}`,
       "Catalog:",
       ...schemaLines,

@@ -283,6 +283,7 @@ export type AgentStreamEvent =
       data: { messageId: string; suggestions: string[] };
     }
   | { type: "title_generated"; data: { title: string } }
+  | { type: "web_sources"; data: { sources: Array<{ title: string; url: string }> } }
   | {
       type: "agent_trace";
       data: {

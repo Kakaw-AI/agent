@@ -1,3 +1,4 @@
+import type { WebSource } from "../net/web-search.js";
 import { ReducedValue, StateSchema, type LangGraphRunnableConfig } from "@langchain/langgraph";
 import { z } from "zod";
 import type { FieldResolutionEntry } from "../graph/types.js";
@@ -73,6 +74,10 @@ export const AgentState = new StateSchema({
   rowCount: value<number>(() => 0),
   /** sql_generated / sql_result already sent to the client. */
   published: value<boolean>(() => false),
+
+  /** Outside facts to look up; set by the SQL draft, searched while answering. */
+  webQuery: value<string>(() => ""),
+  webSources: value<WebSource[]>(() => []),
 
   answer: value<string>(() => ""),
   clarification: value<{ question: string; options: string[] } | null>(() => null),

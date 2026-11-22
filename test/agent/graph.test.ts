@@ -48,7 +48,8 @@ type AgentRunRequest = import("../../src/types.js").AgentRunRequest;
 type AgentHistoryMessage = import("../../src/types.js").AgentHistoryMessage;
 type Event = { type: string; data: Record<string, any> };
 
-const draft = (sql: string, rationale = "") => ({ needsClarification: false, clarifyingQuestion: "", options: [], sql, rationale });
+const draft = (sql: string, rationale = "", webQuery = "") =>
+  ({ needsClarification: false, clarifyingQuestion: "", options: [], sql, rationale, needsWeb: Boolean(webQuery), webQuery });
 
 let base: Omit<AgentRunRequest, "message" | "history">;
 
@@ -282,5 +283,59 @@ describe("agent graph", () => {
     expect(promptsFor(SqlDraftSchema)).toHaveLength(0);
     expect(find(events, "sql_result")?.rows).toEqual(rows);
     expect(find(events, "chart_generated")).toBeDefined();
+  });
+
+  describe("web search", () => {
+    const searchResponse = {
+      success: true,
+      data: { web: [{ url: "https://example.com/churn", title: "SaaS churn benchmarks", markdown: "Average monthly churn is 3.5%." }] },
+    };
+
+    async function withFirecrawl<T>(body: () => Promise<T>) {
+      process.env.FIRECRAWL_API_URL = "https://fc.test";
+      process.env.FIRECRAWL_API_KEY = "test-key";
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        if (String(input).startsWith("https://fc.test/")) return new Response(JSON.stringify(searchResponse));
+        throw new Error(`Unexpected fetch: ${String(input)}`);
+      });
+      try {
+        const result = await body();
+        // Copied: mockRestore below clears the recorded calls.
+        return { result, calls: [...fetchSpy.mock.calls] };
+      } finally {
+        fetchSpy.mockRestore();
+        delete process.env.FIRECRAWL_API_URL;
+        delete process.env.FIRECRAWL_API_KEY;
+      }
+    }
+
+    it("answers an outside-facts question from the web without touching the database", async () => {
+      script(SqlDraftSchema, draft("", "Needs an industry benchmark.", "average SaaS churn rate 2026"));
+      const { result: events, calls } = await withFirecrawl(() => run("What is the average SaaS churn rate?"));
+
+      expect(calls).toHaveLength(1);
+      expect(JSON.parse(String(calls[0][1]?.body)).query).toBe("average SaaS churn rate 2026");
+      expect(find(events, "web_sources")?.sources).toEqual([{ title: "SaaS churn benchmarks", url: "https://example.com/churn" }]);
+      expect(find(events, "sql_generated")).toBeUndefined();
+      expect(find(events, "message_completed")?.content).toBe(fake.answer);
+    });
+
+    it("runs the query and the search for a question that compares the two", async () => {
+      script(SqlDraftSchema, draft("SELECT COUNT(*) AS customers FROM customers", "", "average customers per SaaS company"));
+      const { result: events } = await withFirecrawl(() => run("How does our customer count compare to a typical SaaS?"));
+
+      expect(find(events, "sql_result")?.rows).toEqual([{ customers: expect.any(Number) }]);
+      expect(find(events, "web_sources")?.sources).toHaveLength(1);
+      // Not stored as a reusable plan: the SQL alone does not reproduce the answer.
+      expect(trace(events).toolCalls.some((call: any) => call.tool === "sql_execution")).toBe(false);
+    });
+
+    it("never searches when the server is not configured", async () => {
+      script(SqlDraftSchema, draft("SELECT COUNT(*) AS customers FROM customers", "", "average customers per SaaS company"));
+      const events = await run("How does our customer count compare to a typical SaaS?");
+
+      expect(find(events, "web_sources")).toBeUndefined();
+      expect(promptsFor(SqlDraftSchema)[0]).toBeDefined();
+    });
   });
 });
