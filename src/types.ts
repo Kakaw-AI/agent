@@ -127,6 +127,8 @@ export type AgentRunRequest = {
   knowledge: DatabaseKnowledgeRuntime;
   llm: AgentLlmRuntime;
   retrieval?: AgentRetrievalContext;
+  /** The conversation still has its placeholder title; name it from this message. */
+  generateTitle?: boolean;
 };
 
 export type AgentSyncRequest = {
@@ -280,6 +282,7 @@ export type AgentStreamEvent =
       type: "suggestions_generated";
       data: { messageId: string; suggestions: string[] };
     }
+  | { type: "title_generated"; data: { title: string } }
   | {
       type: "agent_trace";
       data: {

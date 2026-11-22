@@ -10,6 +10,7 @@ import { RunLogger } from "./logger.js";
 import { cache, generate } from "./plan.js";
 import { route } from "./route.js";
 import { AgentState, type NodeConfig, RunContextSchema, type State } from "./state.js";
+import { generateTitle } from "./title.js";
 import { checkValues } from "./values.js";
 import { verify } from "./verify.js";
 
@@ -110,6 +111,9 @@ async function* run(request: AgentRunRequest, logger: RunLogger, signal?: AbortS
   logger.logRunStart();
   const runId = randomUUID();
 
+  // Started before the graph so it runs alongside the answer, not after it.
+  const title = request.generateTitle ? generateTitle(request, logger, signal) : null;
+
   let final: State | null = null;
   try {
     const stream = await agentGraph.stream(
@@ -143,6 +147,8 @@ async function* run(request: AgentRunRequest, logger: RunLogger, signal?: AbortS
         final = chunk as State;
       }
     }
+    const named = await title;
+    if (named) yield { type: "title_generated", data: { title: named } };
   } catch (error) {
     // The client went away; there is nobody to tell.
     if (signal?.aborted) {

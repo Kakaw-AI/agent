@@ -32,6 +32,11 @@ export const SuggestionsSchema = z.object({
   suggestions: z.array(z.string()),
 });
 
+/** A short name for the conversation, from its first question. */
+export const TitleSchema = z.object({
+  title: z.string(),
+});
+
 export const ChartPlanSchema = z.object({
   kind: z.enum(["bar", "line", "pie", "scatter", "histogram"]),
   title: z.string(),
