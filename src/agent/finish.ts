@@ -1,4 +1,4 @@
-import { buildFallbackChartSpec, planChartSpecDeterministically } from "../graph/chart-spec.js";
+import { buildFallbackChartSpec, planChartSpecDeterministically, requestedChartKind } from "../graph/chart-spec.js";
 import { buildNoRowsAnswer } from "../llm/answers.js";
 import { setCachedPlan } from "../llm/cache.js";
 import { shouldAutoPlanChart } from "../llm/intent/chart-planning.js";
@@ -172,11 +172,14 @@ export async function chart(state: State, config: NodeConfig): Promise<Update> {
   }
 
   const steps = [step("Planning a D3 visualization...")];
+  // The newest message first: a follow-up's rewrite can drop "as a bar chart".
+  const requestedKind = requestedChartKind(request.message) ?? requestedChartKind(state.question);
   const deterministic = planChartSpecDeterministically({
     question: state.question,
     columns: state.columns,
     rows: state.rows,
     visualizationRequest: state.visualizationRequest,
+    requestedKind,
   });
 
   if (deterministic) {

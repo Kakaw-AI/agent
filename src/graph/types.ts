@@ -34,6 +34,8 @@ export type DeterministicChartSpecInput = {
   columns: string[];
   rows: Array<Record<string, unknown>>;
   visualizationRequest?: VisualizationRequest | null;
+  /** The chart type the user named; read from `question` when left out. */
+  requestedKind?: FallbackChartSpec["kind"] | null;
 };
 
 export type SqlPromptOptions = {

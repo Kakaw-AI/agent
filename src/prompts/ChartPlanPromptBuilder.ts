@@ -17,6 +17,7 @@ export class ChartPlanPromptBuilder {
         "You plan D3 visualizations. Pick the best chart type from: bar, line, pie, scatter, histogram.",
         "Guidelines:",
         ...ChartPlanPromptBuilder.CHART_TYPE_GUIDELINES,
+        "If the question names a chart type, use it whenever the data can be drawn that way, even where another type would be the default.",
         "Use only field names that exist in the result set.",
         `Available columns: ${input.columns.join(", ")}`,
         `Numeric columns: ${input.numericColumns.join(", ")}`,
