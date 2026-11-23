@@ -2,7 +2,14 @@ import Database from "better-sqlite3";
 import { MAX_SAMPLE_ROWS } from "../config.js";
 import type { AgentDatabaseRuntime, DatabaseCatalogTable } from "../types.js";
 import { openSqlite } from "./query.js";
-import { collectSampleValues, normalizeName, sanitizeRow } from "./sanitize.js";
+import {
+  MAX_LISTED_VALUES,
+  collectSampleValues,
+  completeValueList,
+  normalizeName,
+  sanitizeRow,
+  shouldListValues,
+} from "./sanitize.js";
 
 export async function introspectSqlite(
   database: AgentDatabaseRuntime,
@@ -52,10 +59,9 @@ export async function introspectSqlite(
           isNullable: Number(column.notnull ?? 0) === 0,
           isPrimaryKey: Number(column.pk ?? 0) > 0,
           ordinalPosition: Number(column.cid ?? 0) + 1,
-          sampleValues: collectSampleValues(
-            sampleRows,
-            String(column.name ?? ""),
-          ),
+          sampleValues:
+            listSqliteValues(db, name, column, rowCount) ??
+            collectSampleValues(sampleRows, String(column.name ?? "")),
         })),
         indexes: indexes.map((index) => ({
           name: String(index.name ?? "unnamed_index"),
@@ -80,6 +86,32 @@ export async function introspectSqlite(
     });
   } finally {
     db.close();
+  }
+}
+
+/** Every distinct value of a short text column, or null (see `completeValueList`). */
+export function listSqliteValues(
+  db: InstanceType<typeof Database>,
+  tableName: string,
+  column: Record<string, unknown>,
+  rowCount: number | null,
+): string[] | null {
+  const columnName = String(column.name ?? "");
+  const eligible = shouldListValues(
+    { name: columnName, dataType: String(column.type ?? ""), isPrimaryKey: Number(column.pk ?? 0) > 0 },
+    rowCount,
+  );
+  if (!eligible) return null;
+  const quotedColumn = `"${columnName.replace(/"/g, '""')}"`;
+  try {
+    const rows = db
+      .prepare(
+        `SELECT DISTINCT ${quotedColumn} AS value FROM "${tableName.replace(/"/g, '""')}" WHERE ${quotedColumn} IS NOT NULL LIMIT ${MAX_LISTED_VALUES + 1}`,
+      )
+      .all() as Array<{ value: unknown }>;
+    return completeValueList(rows.map((row) => row.value));
+  } catch {
+    return null;
   }
 }
 

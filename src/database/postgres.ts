@@ -2,7 +2,35 @@ import { Client } from "pg";
 import { MAX_SAMPLE_ROWS, QUERY_TIMEOUT_MS } from "../config.js";
 import { guardedSocket } from "../net/public-host.js";
 import type { AgentDatabaseRuntime, DatabaseCatalogTable } from "../types.js";
-import { collectSampleValues, extractPostgresIndexColumns, normalizeName, sanitizeRow } from "./sanitize.js";
+import {
+  MAX_LISTED_VALUES,
+  collectSampleValues,
+  completeValueList,
+  extractPostgresIndexColumns,
+  normalizeName,
+  sanitizeRow,
+  shouldListValues,
+} from "./sanitize.js";
+
+/**
+ * Every distinct value of a short text column, or null (see `completeValueList`).
+ * The savepoint keeps one failed lookup (a timeout, a type without equality)
+ * from aborting the read-only transaction the rest of introspection runs in.
+ */
+async function listPostgresValues(client: Client, qualifiedTable: string, columnName: string) {
+  const quoted = `"${columnName.replace(/"/g, '""')}"`;
+  await client.query("SAVEPOINT list_values");
+  try {
+    const result = await client.query<{ value: unknown }>(
+      `SELECT DISTINCT ${quoted}::text AS value FROM ${qualifiedTable} WHERE ${quoted} IS NOT NULL LIMIT ${MAX_LISTED_VALUES + 1}`,
+    );
+    await client.query("RELEASE SAVEPOINT list_values");
+    return completeValueList(result.rows.map((row) => row.value));
+  } catch {
+    await client.query("ROLLBACK TO SAVEPOINT list_values");
+    return null;
+  }
+}
 
 export async function introspectPostgres(
   database: AgentDatabaseRuntime,
@@ -115,21 +143,30 @@ export async function introspectPostgres(
       );
       const sampleRows = sampleResult.rows.map(sanitizeRow);
       const primaryKeyNames = new Set(primaryKeys.rows.map((item) => item.column_name));
-
-      tables.push({
-        schemaName,
-        name: tableName,
-        rowCount: Number(rowCountResult.rows[0]?.count ?? 0),
-        sampleRows,
-        columns: columns.rows.map((column) => ({
+      const rowCount = Number(rowCountResult.rows[0]?.count ?? 0);
+      const catalogColumns = [];
+      for (const column of columns.rows) {
+        const isPrimaryKey = primaryKeyNames.has(column.column_name);
+        const listed = shouldListValues({ name: column.column_name, dataType: column.data_type, isPrimaryKey }, rowCount)
+          ? await listPostgresValues(client, qualified, column.column_name)
+          : null;
+        catalogColumns.push({
           name: column.column_name,
           normalizedName: normalizeName(column.column_name),
           dataType: column.data_type,
           isNullable: column.is_nullable === "YES",
-          isPrimaryKey: primaryKeyNames.has(column.column_name),
+          isPrimaryKey,
           ordinalPosition: column.ordinal_position,
-          sampleValues: collectSampleValues(sampleRows, column.column_name),
-        })),
+          sampleValues: listed ?? collectSampleValues(sampleRows, column.column_name),
+        });
+      }
+
+      tables.push({
+        schemaName,
+        name: tableName,
+        rowCount,
+        sampleRows,
+        columns: catalogColumns,
         indexes: indexes.rows.map((index) => ({
           name: index.indexname,
           columns: extractPostgresIndexColumns(index.indexdef),

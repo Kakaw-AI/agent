@@ -75,6 +75,7 @@ export abstract class BaseSqlPromptBuilder {
       ...this.buildDialectInstructions(),
       "Every aggregate metric must have a readable user-facing alias such as model_count, total_revenue, or average_rating.",
       "When you filter on a text column, use a value exactly as it appears in the catalog examples (same spelling and case). If the example values do not include the one you need, match case-insensitively.",
+      "A column shown with 'values:' lists every value it holds. When the question names one of them (a category, status or name), filter on that exact value; do not ask which one the user means and do not substitute a shorter or similar value.",
       "Earlier turns of the conversation include the SQL they ran. For a follow-up, start from that SQL and change only what the new question changes.",
       ...OUTPUT_INSTRUCTIONS,
       ...webInstructions(),

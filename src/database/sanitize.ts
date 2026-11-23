@@ -13,6 +13,49 @@ export function collectSampleValues(rows: Array<Record<string, unknown>>, column
     .slice(0, 3);
 }
 
+/**
+ * A text column with this many distinct values or fewer gets all of them in
+ * the catalog instead of three random samples. Three random rows of a
+ * 46-row `categories` table almost never show 'Home Decor', so the model
+ * guessed a nearby name ('Home') and asked about that instead.
+ */
+export const MAX_LISTED_VALUES = 50;
+/** Longer values are free text (descriptions, titles), not a closed set. */
+const MAX_LISTED_VALUE_CHARS = 60;
+/**
+ * The distinct scan reads the whole column, so big tables skip it and keep
+ * their random samples.
+ * ponytail: size cutoff, not cardinality stats. Read pg_stats.n_distinct if a
+ * large fact table's status column needs listing too.
+ */
+const MAX_VALUE_SCAN_ROWS = 200_000;
+const TEXT_TYPE = /char|text|clob|enum|user-defined/i;
+
+/** Whether introspection should look up a column's distinct values. */
+export function shouldListValues(
+  column: { name: string; dataType: string; isPrimaryKey: boolean },
+  rowCount: number | null,
+): boolean {
+  return (
+    !column.isPrimaryKey &&
+    rowCount !== null &&
+    rowCount <= MAX_VALUE_SCAN_ROWS &&
+    TEXT_TYPE.test(column.dataType) &&
+    !SECRET_FIELD_PATTERN.test(column.name)
+  );
+}
+
+/**
+ * Turns the result of `SELECT DISTINCT col ... LIMIT MAX_LISTED_VALUES + 1`
+ * into the column's complete value list, or null when the column is not a
+ * short closed set (too many values, long text, non-text values).
+ */
+export function completeValueList(values: unknown[]): string[] | null {
+  if (values.length === 0 || values.length > MAX_LISTED_VALUES) return null;
+  if (!values.every((value) => typeof value === "string" && value.length <= MAX_LISTED_VALUE_CHARS)) return null;
+  return [...(values as string[])].sort();
+}
+
 export function normalizeName(value: string) {
   return normalizeIdentifier(value);
 }

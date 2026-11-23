@@ -1,3 +1,4 @@
+import { MAX_SAMPLE_ROWS } from "../config.js";
 import type { DatabaseCatalogTable } from "../types.js";
 
 /**
@@ -32,6 +33,12 @@ const MAX_SAMPLE_CHARS = 40;
 function renderSampleValues(column: DatabaseCatalogTable["columns"][number]): string {
   if (column.isPrimaryKey || NUMERIC_TYPE.test(column.dataType) || !column.sampleValues) {
     return "";
+  }
+  // More than the random sample size means introspection stored the column's
+  // complete value list (see `completeValueList`): render every value, untrimmed,
+  // so the model can match a name in the question to a real one.
+  if (column.sampleValues.length > MAX_SAMPLE_ROWS) {
+    return `, values: ${column.sampleValues.map((value) => `'${String(value).replace(/'/g, "''")}'`).join(", ")}`;
   }
   const seen = new Set<string>();
   for (const sample of column.sampleValues) {
