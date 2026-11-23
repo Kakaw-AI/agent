@@ -1,7 +1,7 @@
 import 'dotenv/config';
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { verifyIncomingSignature } from "./auth.js";
+import { checkSignatureHeaders, SignatureError, verifyIncomingSignature } from "./auth.js";
 import { loadInfisicalSecrets } from "./config/infisical.js";
 import { syncDatabase } from './database/knowledge.js';
 import { streamAgent } from "./agent/graph.js";
@@ -23,12 +23,11 @@ const server = createServer(async (request, response) => {
       return;
     }
 
+    const timestamp = headerValue(request.headers["x-kakaw-request-timestamp"]);
+    const signature = headerValue(request.headers["x-kakaw-signature"]);
+    checkSignatureHeaders(timestamp, signature);
     const rawBody = await readBody(request);
-    verifyIncomingSignature(
-      headerValue(request.headers["x-kakaw-request-timestamp"]),
-      headerValue(request.headers["x-kakaw-signature"]),
-      rawBody,
-    );
+    verifyIncomingSignature(timestamp, signature, rawBody);
 
     if (request.url === "/api/chat/sync") {
       const payload = JSON.parse(rawBody) as AgentSyncRequest;
@@ -68,6 +67,11 @@ const server = createServer(async (request, response) => {
 
     writeJson(response, 404, { error: { message: "Not found." } });
   } catch (error) {
+    if (error instanceof SignatureError) {
+      emitLog("warn", `Rejected unsigned request: ${error.message}`, { statusCode: 401, url: request.url ?? "" });
+      writeJson(response, 401, { error: { message: error.message, code: "AGENT_UNAUTHORIZED", statusCode: 401, retryable: false } });
+      return;
+    }
     const message = error instanceof Error && error.message.trim() ? error.message.trim() : "Unexpected agent failure.";
     console.error("Error handling request:", { message, statusCode: 500 });
     emitLog("error", `Error handling request: ${message}`, { statusCode: 500, url: request.url ?? "" });
