@@ -63,3 +63,52 @@ describe("planChartSpecDeterministically", () => {
     ).toBe("line");
   });
 });
+
+describe("chart shape follows the table", () => {
+  const plan = (columns: string[], rows: Array<Record<string, unknown>>, question = "visualize this") =>
+    planChartSpecDeterministically({ question, columns, rows });
+
+  it("draws two measures per category as bars plus a line on its own axis", () => {
+    const spec = plan(["category", "revenue", "order_count"], [
+      { category: "Home", revenue: 52000, order_count: 310 },
+      { category: "Toys", revenue: 18000, order_count: 420 },
+      { category: "Books", revenue: 9000, order_count: 150 },
+    ]);
+    expect(spec).toMatchObject({ kind: "combo", yField: "revenue", y2Field: "order_count" });
+  });
+
+  it("draws three measures per row as a labelled bubble chart", () => {
+    const rows = ["Ann", "Bob", "Cy", "Dee", "Eve"].map((customer, i) => ({
+      customer,
+      total_revenue: 1000 * (i + 1),
+      orders: 3 + i,
+      avg_order_value: 200 + i * 10,
+    }));
+    const spec = plan(["customer", "total_revenue", "orders", "avg_order_value"], rows);
+    expect(spec).toMatchObject({ kind: "bubble", labelField: "customer", sizeField: "avg_order_value" });
+  });
+
+  it("uses a heatmap when category x series is too wide for grouped bars", () => {
+    const rows = Array.from({ length: 15 }, (_, i) =>
+      ["A", "B", "C", "D", "E", "F", "G", "H"].map((region) => ({ product: `P${i}`, region, sales: i + region.charCodeAt(0) })),
+    ).flat();
+    expect(plan(["product", "region", "sales"], rows)?.kind).toBe("heatmap");
+  });
+
+  it("draws one line per series over time", () => {
+    const rows = ["2026-07", "2026-08", "2026-09"].flatMap((order_month) =>
+      ["Web", "Store"].map((channel, i) => ({ order_month, channel, revenue: 100 * (i + 1) })),
+    );
+    expect(plan(["order_month", "channel", "revenue"], rows)).toMatchObject({ kind: "line", seriesField: "channel" });
+  });
+
+  it("ranks a long list as horizontal bars and ignores ids", () => {
+    const rows = Array.from({ length: 10 }, (_, i) => ({ product_id: i, product_name: `Product ${i}`, units: 50 - i }));
+    expect(plan(["product_id", "product_name", "units"], rows)).toMatchObject({ kind: "hbar", xField: "product_name", yField: "units" });
+  });
+
+  it("treats a per-row attribute as a label, not a series", () => {
+    const rows = ["Ann", "Bob", "Cy"].map((name, i) => ({ name, city: `City ${i}`, spend: 10 * (i + 1) }));
+    expect(plan(["name", "city", "spend"], rows)?.seriesField ?? null).toBeNull();
+  });
+});

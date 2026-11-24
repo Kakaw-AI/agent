@@ -20,13 +20,26 @@ export type VisualizationValidationInput = {
 };
 
 export type FallbackChartSpec = {
-  kind: "bar" | "line" | "pie" | "scatter" | "histogram";
+  /**
+   * hbar: ranked horizontal bars. combo: bars for yField, a line for y2Field on
+   * its own right axis. bubble: x/y numbers, sizeField as area, labelField per
+   * point. heatmap: xField by seriesField grid, yField as colour.
+   */
+  kind: "bar" | "hbar" | "line" | "pie" | "scatter" | "bubble" | "combo" | "heatmap" | "histogram";
   title: string;
   xField: string;
   yField: string;
   xLabel: string;
   yLabel: string;
   data: Array<Record<string, unknown>>;
+  seriesField?: string | null;
+  stacked?: boolean;
+  legendLabel?: string | null;
+  y2Field?: string | null;
+  y2Label?: string | null;
+  sizeField?: string | null;
+  sizeLabel?: string | null;
+  labelField?: string | null;
 };
 
 export type DeterministicChartSpecInput = {

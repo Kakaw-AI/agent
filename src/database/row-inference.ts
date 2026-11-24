@@ -52,21 +52,22 @@ export function hasNumericValue(rows: Array<Record<string, unknown>>, field: str
   return rows.some((row) => typeof getColumnValue(row, field) === "number");
 }
 
+const TEMPORAL_NAME_TOKENS = new Set(["date", "day", "week", "month", "year", "quarter", "time", "period", "hour", "at"]);
+/** ISO-ish dates and periods: 2026, 2026-07, 2026-07-14, 2026-Q3, 2026-W12. */
+const TEMPORAL_VALUE = /^\d{4}(?:-(?:\d{2}|Q[1-4]|W\d{1,2})(?:-\d{2})?)?(?:[T ][\d:.]+Z?)?$/i;
+
 export function isTemporalField(field: string, rows: Array<Record<string, unknown>>) {
-  if (TEMPORAL_PATTERNS.some((pattern) => pattern.test(field))) {
+  // Split on "_" too: "\bdate\b" never matched "order_date".
+  if (field.toLowerCase().split(/[^a-z0-9]+/).some((token) => TEMPORAL_NAME_TOKENS.has(token))) {
     return true;
   }
 
-  return rows.some((row) => {
-    const value = getColumnValue(row, field);
-    if (value instanceof Date) {
-      return true;
-    }
-    if (typeof value === "string") {
-      return !Number.isNaN(Date.parse(value));
-    }
-    return false;
-  });
+  // Every value must look like a date. Date.parse accepted "Product 1" as 2001-01-01.
+  const values = rows.map((row) => getColumnValue(row, field)).filter((value) => value != null && value !== "");
+  return (
+    values.length > 0 &&
+    values.every((value) => value instanceof Date || (typeof value === "string" && TEMPORAL_VALUE.test(value.trim())))
+  );
 }
 
 export function inferNumericColumns(columns: string[], rows: Array<Record<string, unknown>>) {
