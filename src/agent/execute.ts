@@ -188,12 +188,15 @@ export function dropDuplicateRows(rows: Array<Record<string, unknown>>): Array<R
  * rows; `constantColumns` lists the columns that hold one non-null value on
  * every row, when there are at least two of them beside a column that varies.
  */
+/** A SQL JOIN, or a MongoDB $lookup. */
+const JOINS = /\bjoin\b|"\$lookup"/i;
+
 export function repeatedRows(
   sql: string,
   columns: string[],
   rows: Array<Record<string, unknown>>,
 ): { duplicates: number; constantColumns: string[] } {
-  if (!/\bjoin\b/i.test(sql) || rows.length < 3) return { duplicates: 0, constantColumns: [] };
+  if (!JOINS.test(sql) || rows.length < 3) return { duplicates: 0, constantColumns: [] };
   const copies = countDuplicateRows(rows);
   const duplicates = copies >= 2 && copies * 5 >= rows.length ? copies : 0;
   const first = rows[0];
@@ -216,7 +219,7 @@ export function cleanRepeatedRows(
   columns: string[],
   rows: Array<Record<string, unknown>>,
 ): { rows: Array<Record<string, unknown>>; removed: number; blanked: string[] } {
-  if (!/\bjoin\b/i.test(sql)) return { rows, removed: 0, blanked: [] };
+  if (!JOINS.test(sql)) return { rows, removed: 0, blanked: [] };
   const unique = dropDuplicateRows(rows);
   const blanked = repeatedRows(sql, columns, unique).constantColumns;
   const cleaned = blanked.length === 0
@@ -249,7 +252,9 @@ export async function execute(state: State, config: NodeConfig) {
   const steps = [step(state.generations > 1 || state.freeRepairs > 0 ? "Running the corrected query..." : "Executing SQL against the selected database...")];
   const attemptNumber = state.generations + state.freeRepairs;
 
-  if (state.wantsVisualization && state.visualizationRequest) {
+  // Reads the SELECT list, so it has nothing to read in a MongoDB pipeline;
+  // the result's columns are still checked after the query runs.
+  if (state.wantsVisualization && state.visualizationRequest && request.database.provider !== "mongodb") {
     const plausibility = assessVisualizationSqlDraft({ sql, visualizationRequest: state.visualizationRequest });
     if (!plausibility.ok) {
       return retryOrGiveUp(

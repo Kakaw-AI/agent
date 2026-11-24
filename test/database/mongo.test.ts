@@ -4,8 +4,9 @@ import {
   assertReadOnlyPipeline,
   inferColumns,
   parseMongoConnectionString,
+  parseMongoQuery,
+  referencedCollections,
   toPlain,
-  translateSql,
 } from "../../src/database/mongo.js";
 
 const mongoDatabaseName = (value: string) => parseMongoConnectionString(value).database;
@@ -57,55 +58,32 @@ describe("assertReadOnlyPipeline", () => {
   });
 });
 
-describe("translateSql", () => {
-  it("translates a grouped count", () => {
-    const { collections, pipeline } = translateSql(
-      "SELECT status, COUNT(*) AS orders FROM orders GROUP BY status ORDER BY orders DESC LIMIT 5",
+describe("parseMongoQuery", () => {
+  it("reads Extended JSON, so ids and dates are typed", () => {
+    const { collection, pipeline } = parseMongoQuery(
+      '{"collection": "orders", "pipeline": [{"$match": {"customer_id": {"$oid": "5f1d7f1d7f1d7f1d7f1d7f1d"}, "created_at": {"$gte": {"$date": "2025-01-01T00:00:00Z"}}}}]}',
     );
-    expect(collections).toEqual(["orders"]);
-    expect(JSON.stringify(pipeline)).toContain("$group");
+    expect(collection).toBe("orders");
+    const match = pipeline[0].$match;
+    expect(match.customer_id).toBeInstanceOf(ObjectId);
+    expect(match.created_at.$gte).toBeInstanceOf(Date);
   });
 
-  it("reads backticked dot paths as nested fields", () => {
-    const { pipeline } = translateSql(
-      "SELECT `address.city` AS city, COUNT(*) AS n FROM customers WHERE `address.country` = 'DE' GROUP BY `address.city`",
+  it("raises a syntax error the repair loop can show the model", () => {
+    expect(() => parseMongoQuery("SELECT * FROM orders")).toThrow(/syntax error: the query is not valid JSON/);
+    expect(() => parseMongoQuery('{"pipeline": []}')).toThrow(/"collection"/);
+    expect(() => parseMongoQuery('{"collection": "orders", "pipeline": [1]}')).toThrow(/"pipeline"/);
+  });
+
+  it("blocks writing stages", () => {
+    expect(() => parseMongoQuery('{"collection": "orders", "pipeline": [{"$out": "copy"}]}')).toThrow(/\$out/);
+  });
+
+  it("lists every collection a query reads", () => {
+    const query = parseMongoQuery(
+      '{"collection": "customers", "pipeline": [{"$lookup": {"from": "orders", "localField": "_id", "foreignField": "customer_id", "as": "o"}}, {"$unionWith": {"coll": "archive"}}]}',
     );
-    const text = JSON.stringify(pipeline);
-    expect(text).toContain("address.country");
-    expect(text).toContain("$address.city");
-  });
-
-  it("translates a join with an unwind hint", () => {
-    const { collections, pipeline } = translateSql(
-      "SELECT c.country, SUM(o.total) AS revenue FROM customers c INNER JOIN orders AS `o|unwind` ON o.customer_id = c._id GROUP BY c.country",
-    );
-    expect(collections).toContain("customers");
-    expect(JSON.stringify(pipeline)).toContain("$lookup");
-  });
-
-  it("translates the distinct-values probe the value check runs", () => {
-    const { collections } = translateSql(
-      "SELECT DISTINCT `status` AS value FROM `orders` WHERE `status` IS NOT NULL LIMIT 100",
-    );
-    expect(collections).toEqual(["orders"]);
-  });
-
-  it("reads double-quoted names as fields too", () => {
-    const { collections, pipeline } = translateSql(`SELECT "status" AS s FROM "orders" WHERE "status" = 'paid'`);
-    expect(collections).toEqual(["orders"]);
-    // The value check (values.ts) quotes this way, and so do models used to Postgres.
-    expect(pipeline[0]).toEqual({ $match: { status: { $eq: "paid" } } });
-  });
-
-  it("drops LOWER/UPPER around a LIKE operand, which NoQL mistranslates and its LIKE does not need", () => {
-    const { pipeline } = translateSql("SELECT p.name FROM customers p WHERE LOWER(p.fullName) LIKE '%rowan sami%' AND UPPER(`p.tag`) NOT LIKE 'X%'");
-    const text = JSON.stringify(pipeline);
-    expect(text).not.toContain("undefined");
-    expect(text).toContain('"$regex":"rowan sami","$options":"i"');
-  });
-
-  it("raises a parse error the repair loop can show the model", () => {
-    expect(() => translateSql("SELECT FROM WHERE")).toThrow();
+    expect(referencedCollections(query)).toEqual(["customers", "orders", "archive"]);
   });
 });
 
@@ -157,7 +135,7 @@ describe("network guard", () => {
     try {
       for (const connectionString of ["mongodb://127.0.0.1:27017/db", "mongodb://169.254.169.254/db", "mongodb://[::1]:27017/db"]) {
         await expect(
-          executeReadOnlyQuery({ sourceId: "s", provider: "mongodb", label: "x", connectionString }, "SELECT * FROM t"),
+          executeReadOnlyQuery({ sourceId: "s", provider: "mongodb", label: "x", connectionString }, '{"collection": "t", "pipeline": []}'),
         ).rejects.toThrow(/private or internal/);
       }
     } finally {

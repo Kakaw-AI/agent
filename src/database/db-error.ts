@@ -98,8 +98,8 @@ export function normalizeDbError(error: unknown): NormalizedDbError {
     }
   }
 
-  // NoQL (MongoDB) reports parse errors as "[Start: Line 1, Col:8]... - Expected ...".
-  if (kind === "other" && /syntax error|^\[Start: Line/i.test(message)) {
+  // Covers SQLite, and MongoDB queries that are not valid JSON (mongo.ts).
+  if (kind === "other" && /syntax error/i.test(message)) {
     kind = "syntax";
   }
 

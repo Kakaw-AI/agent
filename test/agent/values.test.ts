@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extractLiteralFilters, resolveFilterTable } from "../../src/agent/values.js";
+import { extractLiteralFilters, mongoTargets, resolveFilterTable } from "../../src/agent/values.js";
 import { isSmallTalk } from "../../src/llm/intent/patterns.js";
 import type { DatabaseKnowledgeRuntime } from "../../src/types.js";
 
@@ -37,6 +37,29 @@ describe("resolveFilterTable", () => {
   it("gives up on an unqualified column that exists in two joined tables", () => {
     const status = extractLiteralFilters(sql)[1];
     expect(resolveFilterTable(sql, status, knowledge)).toBeNull();
+  });
+});
+
+describe("mongoTargets", () => {
+  it("finds string filters in the leading $match stages of a pipeline", () => {
+    const query = JSON.stringify({
+      collection: "orders",
+      pipeline: [
+        { $match: { status: "cancelled", $and: [{ customer_id: { $in: ["a", "b"] } }] } },
+        { $match: { status: { $regex: "ship", $options: "i" }, unknown: "x" } },
+        { $lookup: { from: "customers", localField: "customer_id", foreignField: "_id", as: "c" } },
+        { $match: { status: "after-lookup" } },
+      ],
+    });
+    expect(mongoTargets(query, knowledge).map(({ column, operator, literals }) => ({ column, operator, literals }))).toEqual([
+      { column: "status", operator: "=", literals: ["cancelled"] },
+      { column: "customer_id", operator: "=", literals: ["a", "b"] },
+      { column: "status", operator: "regex", literals: ["ship"] },
+    ]);
+  });
+
+  it("finds nothing in a query that is not JSON", () => {
+    expect(mongoTargets("SELECT 1", knowledge)).toEqual([]);
   });
 });
 

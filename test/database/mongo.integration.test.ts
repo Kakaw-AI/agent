@@ -1,8 +1,37 @@
+import { AIMessage, AIMessageChunk } from "@langchain/core/messages";
 import { MongoClient, ObjectId } from "mongodb";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { syncDatabase } from "../../src/database/knowledge.js";
-import { executeReadOnlyQuery } from "../../src/database/query.js";
-import type { AgentDatabaseRuntime } from "../../src/types.js";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+// The model, scripted: SQL drafts come from `drafts` in order.
+const fake = vi.hoisted(() => ({ drafts: [] as string[] }));
+vi.mock("../../src/llm/langchain.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/llm/langchain.js")>();
+  const usage = { input_tokens: 1, output_tokens: 1, total_tokens: 2 };
+  const draft = (sql: string) => ({ needsClarification: false, clarifyingQuestion: "", options: [], sql, rationale: "", needsWeb: false, webQuery: "" });
+  return {
+    ...actual,
+    createLangChainModel: () => ({
+      withStructuredOutput: (schema: { shape?: Record<string, unknown> }) => ({
+        invoke: async () => {
+          const shape = schema.shape ?? {};
+          const parsed =
+            "sql" in shape ? draft(fake.drafts.shift() ?? "")
+            : "answersQuestion" in shape ? { answersQuestion: true, problem: "", needsWeb: false, webQuery: "" }
+            : "suggestions" in shape ? { suggestions: [] }
+            : "xField" in shape ? { kind: "bar", title: "", xField: "x", yField: "y" }
+            : { kind: "data", standaloneQuestion: "" };
+          return { raw: new AIMessage({ content: "", usage_metadata: usage }), parsed };
+        },
+      }),
+      stream: async () => (async function* () { yield new AIMessageChunk({ content: "Answer.", usage_metadata: usage }); })(),
+    }),
+  };
+});
+
+const { syncDatabase } = await import("../../src/database/knowledge.js");
+const { executeReadOnlyQuery } = await import("../../src/database/query.js");
+const { streamAgent } = await import("../../src/agent/graph.js");
+type AgentDatabaseRuntime = import("../../src/types.js").AgentDatabaseRuntime;
 
 // Runs against a real server: MONGO_TEST_URL=mongodb://localhost:27017 yarn test
 const baseUrl = process.env.MONGO_TEST_URL;
@@ -52,54 +81,88 @@ describe.skipIf(!baseUrl)("MongoDB end to end", () => {
     expect(sync.schemaFingerprint).toMatch(/^[0-9a-f]{64}$/);
   });
 
-  it("matches LIKE without case, with or without a LOWER the model added", async () => {
-    const result = await executeReadOnlyQuery(database, "SELECT name FROM customers WHERE LOWER(name) LIKE '%an%'");
-    expect(result.rows).toEqual([{ name: "Ann" }]);
-    // The value check's direct lookup on MongoDB: an anchored, case-blind LIKE.
-    const exact = await executeReadOnlyQuery(database, `SELECT DISTINCT "status" AS value FROM "orders" WHERE "status" LIKE 'shipped' LIMIT 5`);
-    expect(exact.rows).toEqual([{ value: "Shipped" }]);
-  });
+  const run = (query: object) => executeReadOnlyQuery(database, JSON.stringify(query));
 
   it("answers a grouped question", async () => {
-    const result = await executeReadOnlyQuery(
-      database,
-      "SELECT status, COUNT(*) AS order_count, SUM(total) AS revenue FROM orders GROUP BY status ORDER BY order_count DESC",
-    );
+    const result = await run({
+      collection: "orders",
+      pipeline: [
+        { $group: { _id: "$status", order_count: { $sum: 1 }, revenue: { $sum: "$total" } } },
+        { $sort: { order_count: -1 } },
+        { $project: { _id: 0, status: "$_id", order_count: 1, revenue: 1 } },
+      ],
+    });
     expect(result.rows).toEqual([
-      { status: "Shipped", order_count: 2, revenue: 195.5 },
-      { status: "Cancelled", order_count: 1, revenue: 30 },
+      { order_count: 2, revenue: 195.5, status: "Shipped" },
+      { order_count: 1, revenue: 30, status: "Cancelled" },
     ]);
   });
 
-  it("filters on a nested field and redacts secrets", async () => {
-    const result = await executeReadOnlyQuery(database, "SELECT name, password FROM customers WHERE `address.country` = 'FR'");
-    expect(result.rows).toEqual([{ name: "Bob", password: "[redacted]" }]);
+  it("filters on a nested field, flattens sub-documents and redacts secrets", async () => {
+    const result = await run({ collection: "customers", pipeline: [{ $match: { "address.country": "FR" } }, { $project: { _id: 0, name: 1, address: 1, password: 1 } }] });
+    expect(result.rows).toEqual([{ name: "Bob", "address.city": "Paris", "address.country": "FR", password: "[redacted]" }]);
   });
 
-  it("joins two collections", async () => {
-    const result = await executeReadOnlyQuery(
-      database,
-      "SELECT c.name AS customer, SUM(o.total) AS revenue FROM customers c INNER JOIN orders AS `o|unwind` ON o.customer_id = c._id GROUP BY c.name ORDER BY revenue DESC",
-    );
+  it("joins two collections on ObjectIds", async () => {
+    const result = await run({
+      collection: "customers",
+      pipeline: [
+        { $lookup: { from: "orders", localField: "_id", foreignField: "customer_id", as: "o" } },
+        { $unwind: "$o" },
+        { $group: { _id: "$name", revenue: { $sum: "$o.total" } } },
+        { $sort: { revenue: -1 } },
+        { $project: { _id: 0, customer: "$_id", revenue: 1 } },
+      ],
+    });
     expect(result.rows).toEqual([
-      { customer: "Ann", revenue: 150.5 },
-      { customer: "Bob", revenue: 75 },
+      { revenue: 150.5, customer: "Ann" },
+      { revenue: 75, customer: "Bob" },
     ]);
   });
 
-  it("runs the distinct-values probe the value check uses", async () => {
-    const result = await executeReadOnlyQuery(
-      database,
-      `SELECT DISTINCT "status" AS value FROM "orders" WHERE "status" IS NOT NULL LIMIT 100`,
-    );
-    expect(result.rows.map((row) => row.value).sort()).toEqual(["Cancelled", "Shipped"]);
+  it("finds a filtered value the value check looks up, ignoring case", async () => {
+    const result = await run({
+      collection: "orders",
+      pipeline: [
+        { $match: { status: { $regex: "^shipped$", $options: "i" } } },
+        { $group: { _id: "$status" } },
+        { $project: { _id: 0, value: "$_id" } },
+      ],
+    });
+    expect(result.rows).toEqual([{ value: "Shipped" }]);
   });
 
-  it("reports a missing collection as an unknown table", async () => {
-    await expect(executeReadOnlyQuery(database, "SELECT * FROM ordrs")).rejects.toThrow('relation "ordrs" does not exist');
+  it("reports a missing collection, joined ones included, as an unknown table", async () => {
+    await expect(run({ collection: "ordrs", pipeline: [] })).rejects.toThrow('relation "ordrs" does not exist');
+    await expect(
+      run({ collection: "customers", pipeline: [{ $lookup: { from: "ordrs", localField: "_id", foreignField: "customer_id", as: "o" } }] }),
+    ).rejects.toThrow('relation "ordrs" does not exist');
   });
 
   it("rejects writes before they reach the server", async () => {
-    await expect(executeReadOnlyQuery(database, "DELETE FROM orders")).rejects.toThrow(/read-only/);
+    await expect(run({ collection: "orders", pipeline: [{ $merge: "copy" }] })).rejects.toThrow(/\$merge/);
+  });
+
+  it("runs a native query through the agent, fixing a wrongly cased value without another draft", async () => {
+    const sync = await syncDatabase(database);
+    fake.drafts = [JSON.stringify({ collection: "orders", pipeline: [{ $match: { status: "shipped" } }, { $count: "orders" }] })];
+    const events: Array<{ type: string; data: Record<string, any> }> = [];
+    for await (const event of streamAgent({
+      requestId: "r",
+      conversationId: "c",
+      userId: "u",
+      messageId: "m",
+      message: "How many orders shipped?",
+      history: [],
+      database: { ...database, schemaFingerprint: sync.schemaFingerprint },
+      knowledge: { schemaFingerprint: sync.schemaFingerprint, summary: "", tables: sync.catalog.tables, knowledgeDocuments: [] },
+      llm: { connectionId: "l", provider: "openai", model: "test", apiKey: "k" },
+    } as never)) {
+      events.push(event as never);
+    }
+    expect(events.find((event) => event.type === "message_failed")).toBeUndefined();
+    expect(events.find((event) => event.type === "sql_generated")?.data.sql).toContain('"Shipped"');
+    expect(events.find((event) => event.type === "sql_result")?.data.rows).toEqual([{ orders: 2 }]);
+    expect(fake.drafts).toEqual([]);
   });
 });

@@ -9,6 +9,7 @@ import { PostgresSqlPromptBuilder } from "../prompts/database/PostgresSqlPromptB
 import { SqliteSqlPromptBuilder } from "../prompts/database/SqliteSqlPromptBuilder.js";
 import { MongoSqlPromptBuilder } from "../prompts/database/MongoSqlPromptBuilder.js";
 import { VisualizationSqlUserPromptBuilder } from "../prompts/VisualizationSqlUserPromptBuilder.js";
+import type { AgentRunRequest } from "../types.js";
 import { planWebQuery } from "./web.js";
 import { type NodeConfig, runtime, type SqlFeedback, type State, type Update } from "./state.js";
 
@@ -41,6 +42,15 @@ export function retryOrGiveUp(
       steps: [...(Array.isArray(update.steps) ? update.steps : []), { text: `Stopped after ${MAX_GENERATIONS} attempts.`, at: new Date().toISOString() }],
     },
   });
+}
+
+/**
+ * Query memory written for this source before it switched dialect: MongoDB
+ * sources were queried in SQL until native pipelines replaced it, and that
+ * SQL no longer runs there.
+ */
+function fitsSource(request: AgentRunRequest, text: string) {
+  return request.database.provider !== "mongodb" || text.trimStart().startsWith("{");
 }
 
 /**
@@ -86,7 +96,7 @@ export async function cache(state: State, config: NodeConfig) {
   // follow-up that text ("what about Latin America?") says nothing on its own,
   // and the stored SQL may belong to a different conversation entirely.
   const exactPlan = request.retrieval?.exactPlan;
-  if (exactPlan?.sql && !state.rewritten) {
+  if (exactPlan?.sql && !state.rewritten && fitsSource(request, exactPlan.sql)) {
     return new Command({
       goto: "execute",
       update: {
@@ -139,7 +149,7 @@ export async function generate(state: State, config: NodeConfig) {
         priorSql: feedback?.sql || null,
         priorErrors: feedback?.issues ?? [],
         dbErrorBlock: feedback?.dbErrorBlock ?? null,
-        examples: request.retrieval?.examples,
+        examples: request.retrieval?.examples?.filter((example) => fitsSource(request, example.sql)),
         fieldSuggestions: didYouMeanFromEntries(state.fieldResolutions),
       }),
       history: request.history,

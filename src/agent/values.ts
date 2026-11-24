@@ -1,4 +1,5 @@
 import { Command } from "@langchain/langgraph";
+import { parseMongoQuery } from "../database/mongo.js";
 import { executeReadOnlyQuery } from "../database/query.js";
 import { SECRET_FIELD_PATTERN } from "../database/sanitize.js";
 import type { AgentDatabaseRuntime, DatabaseCatalogTable, DatabaseKnowledgeRuntime } from "../types.js";
@@ -103,38 +104,108 @@ export function resolveFilterTable(
   return { table: matches[0].table, column: hasColumn(matches[0].table)!.name };
 }
 
+/** A filter to check, resolved to the catalog column it reads. */
+type Target = { table: DatabaseCatalogTable; column: string; operator: "=" | "like" | "regex"; literals: string[] };
+
+function sqlTargets(sql: string, knowledge: DatabaseKnowledgeRuntime): Target[] {
+  return extractLiteralFilters(sql).flatMap((filter) => {
+    const target = resolveFilterTable(sql, filter, knowledge);
+    return target ? [{ ...target, operator: filter.operator, literals: filter.literals }] : [];
+  });
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+/**
+ * String filters in the leading $match stages of a MongoDB query: equality,
+ * $eq, $in and $regex on the collection's own fields. A $match after a $lookup
+ * or $group may name joined or computed fields, so the scan stops there.
+ */
+export function mongoTargets(text: string, knowledge: DatabaseKnowledgeRuntime): Target[] {
+  let query;
+  try {
+    query = parseMongoQuery(text);
+  } catch {
+    return [];
+  }
+  const table = findTable(knowledge, query.collection);
+  if (!table) return [];
+  const targets: Target[] = [];
+
+  const visit = (match: Record<string, unknown>) => {
+    for (const [key, value] of Object.entries(match)) {
+      if (key === "$and" && Array.isArray(value)) {
+        value.filter(isRecord).forEach(visit);
+        continue;
+      }
+      const column = table.columns.find((candidate) => candidate.name === key)?.name;
+      if (!column) continue;
+      // Extended JSON parses {"$regex": ..., "$options": ...} into a BSONRegExp.
+      const regex = isRecord(value) && value._bsontype === "BSONRegExp" ? value : isRecord(value) ? value.$regex : undefined;
+      const condition = isRecord(value) && !("_bsontype" in value) ? value : { $eq: value };
+      if (isRecord(regex) && typeof regex.pattern === "string") {
+        targets.push({ table, column, operator: "regex", literals: [regex.pattern] });
+      } else if (typeof regex === "string") {
+        targets.push({ table, column, operator: "regex", literals: [regex] });
+      } else if (typeof condition.$eq === "string") {
+        targets.push({ table, column, operator: "=", literals: [condition.$eq] });
+      } else if (Array.isArray(condition.$in) && condition.$in.length > 0 && condition.$in.every((item) => typeof item === "string")) {
+        targets.push({ table, column, operator: "=", literals: condition.$in as string[] });
+      }
+    }
+  };
+  for (const stage of query.pipeline) {
+    if (!isRecord(stage.$match)) break;
+    visit(stage.$match);
+  }
+  return targets;
+}
+
 function quoteIdentifier(name: string) {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 /**
  * Distinct values of a column: a sample of up to 100, or with `match` the
- * ones equal to or LIKE the literal, ignoring case. The sample alone cannot
- * show whether a name exists among thousands, so the literal is looked up
- * directly first.
+ * ones that match the literal, ignoring case. The sample alone cannot show
+ * whether a name exists among thousands, so the literal is looked up directly
+ * first.
  */
 async function storedValues(
   database: AgentDatabaseRuntime,
   table: DatabaseCatalogTable,
   column: string,
-  match?: { operator: "=" | "like"; literal: string },
+  match?: { operator: Target["operator"]; literal: string },
 ): Promise<string[]> {
-  const tableName =
-    database.provider === "postgresql" && table.schemaName
-      ? `${quoteIdentifier(table.schemaName)}.${quoteIdentifier(table.name)}`
-      : quoteIdentifier(table.name);
-  const columnName = quoteIdentifier(column);
-  // NoQL's LIKE ignores case and anchors a pattern without %, and it reads a
-  // quoted name inside LOWER() as a string, so MongoDB gets a bare LIKE.
-  const where = !match
-    ? `${columnName} IS NOT NULL`
-    : database.provider === "mongodb"
-      ? `${columnName} LIKE ${quoteLiteral(match.literal)}`
-      : `LOWER(${columnName}) ${match.operator === "like" ? "LIKE" : "="} ${quoteLiteral(match.literal.toLowerCase())}`;
-  const result = await executeReadOnlyQuery(
-    database,
-    `SELECT DISTINCT ${columnName} AS value FROM ${tableName} WHERE ${where} LIMIT ${match ? 5 : 100}`,
-  );
+  let query: string;
+  if (database.provider === "mongodb") {
+    const filter = !match
+      ? { $type: "string" }
+      : { $regex: match.operator === "regex" ? match.literal : `^${escapeRegExp(match.literal)}$`, $options: "i" };
+    query = JSON.stringify({
+      collection: table.name,
+      pipeline: [
+        { $match: { [column]: filter } },
+        { $group: { _id: `$${column}` } },
+        { $limit: match ? 5 : 100 },
+        { $project: { _id: 0, value: "$_id" } },
+      ],
+    });
+  } else {
+    const tableName =
+      database.provider === "postgresql" && table.schemaName
+        ? `${quoteIdentifier(table.schemaName)}.${quoteIdentifier(table.name)}`
+        : quoteIdentifier(table.name);
+    const columnName = quoteIdentifier(column);
+    const where = !match
+      ? `${columnName} IS NOT NULL`
+      : `LOWER(${columnName}) ${match.operator === "=" ? "=" : "LIKE"} ${quoteLiteral(match.literal.toLowerCase())}`;
+    query = `SELECT DISTINCT ${columnName} AS value FROM ${tableName} WHERE ${where} LIMIT ${match ? 5 : 100}`;
+  }
+  const result = await executeReadOnlyQuery(database, query);
   return result.rows.map((row) => String(row.value));
 }
 
@@ -143,6 +214,15 @@ async function found(...args: Parameters<typeof storedValues>): Promise<string[]
     return await storedValues(...args);
   } catch {
     return [];
+  }
+}
+
+function patternOf(operator: Target["operator"], literal: string): RegExp | null {
+  if (operator === "like") return likeToRegExp(literal);
+  try {
+    return new RegExp(literal, "i");
+  } catch {
+    return null;
   }
 }
 
@@ -166,7 +246,10 @@ const quoteLiteral = (value: string) => `'${value.replace(/'/g, "''")}'`;
  */
 export async function checkValues(state: State, config: NodeConfig) {
   const { request, step } = runtime(config, "checkValues");
-  const filters = extractLiteralFilters(state.sql);
+  const mongo = request.database.provider === "mongodb";
+  const filters = (mongo ? mongoTargets : sqlTargets)(state.sql, request.knowledge);
+  // A literal as it is written in the query, to swap a stored value in.
+  const quote = mongo ? (value: string) => JSON.stringify(value) : quoteLiteral;
   if (filters.length === 0) {
     return new Command({ goto: afterEmptyResult(state), update: { valuesChecked: true } satisfies Update });
   }
@@ -177,11 +260,10 @@ export async function checkValues(state: State, config: NodeConfig) {
   const mismatches: string[] = [];
   const matched: string[] = [];
 
-  for (const filter of filters.slice(0, MAX_PROBES)) {
-    const target = resolveFilterTable(state.sql, filter, request.knowledge);
+  for (const target of filters.slice(0, MAX_PROBES)) {
     // The probe returns raw values to the model, so it skips columns whose
     // names look sensitive, as the row sanitizer does.
-    if (!target || SECRET_FIELD_PATTERN.test(target.column)) continue;
+    if (SECRET_FIELD_PATTERN.test(target.column)) continue;
 
     let sample: string[];
     try {
@@ -190,15 +272,17 @@ export async function checkValues(state: State, config: NodeConfig) {
       continue;
     }
 
-    for (const literal of filter.literals) {
-      const direct = await found(request.database, target.table, target.column, { operator: filter.operator, literal });
+    for (const literal of target.literals) {
+      const direct = await found(request.database, target.table, target.column, { operator: target.operator, literal });
       const values = [...new Set([...direct, ...sample])];
-      if (filter.operator === "like") {
+      if (target.operator !== "=") {
+        const how = target.operator === "like" ? "LIKE" : "$regex";
+        const pattern = patternOf(target.operator, literal);
         if (direct.length > 0) {
-          matched.push(`${target.table.name}.${target.column} LIKE ${quoteLiteral(literal)} matches stored values (ignoring case): ${direct.map(quoteLiteral).join(", ")}.`);
-        } else if (!values.some((value) => likeToRegExp(literal).test(value))) {
+          matched.push(`${target.table.name}.${target.column} ${how} ${quoteLiteral(literal)} matches stored values (ignoring case): ${direct.map(quoteLiteral).join(", ")}.`);
+        } else if (!pattern || !values.some((value) => pattern.test(value))) {
           mismatches.push(
-            `No value in ${target.table.name}.${target.column} matches LIKE ${quoteLiteral(literal)}. Stored values include: ${values.slice(0, MAX_VALUES_SHOWN).map(quoteLiteral).join(", ")}.`,
+            `No value in ${target.table.name}.${target.column} matches ${how} ${quoteLiteral(literal)}. Stored values include: ${values.slice(0, MAX_VALUES_SHOWN).map(quoteLiteral).join(", ")}.`,
           );
         }
         continue;
@@ -210,8 +294,8 @@ export async function checkValues(state: State, config: NodeConfig) {
 
       const normalized = literal.trim().toLowerCase();
       const caseOnly = values.filter((value) => value.trim().toLowerCase() === normalized);
-      if (caseOnly.length === 1 && sql.includes(quoteLiteral(literal))) {
-        sql = sql.split(quoteLiteral(literal)).join(quoteLiteral(caseOnly[0]));
+      if (caseOnly.length === 1 && sql.includes(quote(literal))) {
+        sql = sql.split(quote(literal)).join(quote(caseOnly[0]));
         corrections.push({ from: literal, to: caseOnly[0], stage: "values" });
         continue;
       }
@@ -255,7 +339,7 @@ export async function checkValues(state: State, config: NodeConfig) {
   // The filtered values exist, so in a joined query the rows were most likely
   // lost in the join: keys of different types (an ObjectId against its string
   // form) or formats never match. One rewrite, then the empty result stands.
-  if (corrections.length === 0 && matched.length > 0 && /\bjoin\b/i.test(state.sql) && state.generations < MAX_GENERATIONS) {
+  if (corrections.length === 0 && matched.length > 0 && /\bjoin\b|"\$lookup"/i.test(state.sql) && state.generations < MAX_GENERATIONS) {
     return new Command({
       goto: "generate",
       update: {

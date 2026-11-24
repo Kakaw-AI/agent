@@ -1,5 +1,4 @@
-import NoQL from "@synatic/noql";
-import { MongoClient, type Db, type Document } from "mongodb";
+import { BSON, MongoClient, type Db, type Document } from "mongodb";
 import { MAX_RESULT_ROWS, MAX_SAMPLE_ROWS, QUERY_TIMEOUT_MS } from "../config.js";
 import { SQLException } from "../exceptions/SQLException.js";
 import { assertPublicHost, isBlockedLiteral, publicLookup } from "../net/public-host.js";
@@ -16,9 +15,9 @@ import {
 import type { QueryResult } from "./types.js";
 
 // MongoDB has no read-only transaction, so the boundary is narrower than for
-// Postgres: the model writes SQL, NoQL turns it into an aggregation pipeline,
-// the pipeline is checked for stages that write or run JavaScript, and only
-// `aggregate` is ever called. Users are told to connect with a `read` role.
+// Postgres: the model writes a native aggregation query as JSON, the pipeline
+// is checked for stages that write or run JavaScript, and only `aggregate` is
+// ever called. Users are told to connect with a `read` role.
 
 /**
  * Connection-string options a user may set. Everything else is refused:
@@ -200,22 +199,56 @@ export function assertReadOnlyPipeline(value: unknown): void {
   }
 }
 
-/**
- * NoQL turns `LOWER(x) LIKE 'y'` into a match on a field named "undefined",
- * which silently finds nothing. Its LIKE already ignores case, so the wrapper
- * is dropped.
- */
-const CASED_LIKE = /\b(?:LOWER|UPPER)\s*\(\s*([^()]+?)\s*\)(?=\s+(?:NOT\s+)?LIKE\b)/gi;
+export type MongoQuery = { collection: string; pipeline: Document[] };
 
-/** SQL to the collection it runs against and the pipeline to run. */
-export function translateSql(sql: string): { collections: string[]; pipeline: Document[] } {
-  const parsed = NoQL.makeMongoAggregate(sql.replace(CASED_LIKE, "$1"), { unsetId: true });
-  // Any other condition NoQL could not place lands on that same field.
-  if (JSON.stringify(parsed.pipeline).includes('"undefined":')) {
-    throw new SQLException("A WHERE condition could not be translated for MongoDB. Compare a plain field, not an expression, with LIKE or =.");
+/**
+ * The query text the model writes for MongoDB: Extended JSON of
+ * `{"collection": "...", "pipeline": [...]}`, so `{"$oid": ...}` and
+ * `{"$date": ...}` become real ObjectIds and dates.
+ */
+export function parseMongoQuery(text: string): MongoQuery {
+  let value: unknown;
+  try {
+    value = BSON.EJSON.parse(text, { relaxed: true });
+  } catch (error) {
+    throw new SQLException(`syntax error: the query is not valid JSON (${(error as Error).message}).`, text);
   }
-  assertReadOnlyPipeline(parsed.pipeline);
-  return { collections: parsed.collections, pipeline: parsed.pipeline as Document[] };
+  const query = value as Partial<MongoQuery> | null;
+  if (
+    !isPlainObject(query) ||
+    typeof query.collection !== "string" ||
+    !query.collection ||
+    !Array.isArray(query.pipeline) ||
+    !query.pipeline.every(isPlainObject)
+  ) {
+    throw new SQLException(
+      'syntax error: the query must be a JSON object {"collection": "<name>", "pipeline": [<stages>]}.',
+      text,
+    );
+  }
+  assertReadOnlyPipeline(query.pipeline);
+  return { collection: query.collection, pipeline: query.pipeline as Document[] };
+}
+
+/** Every collection a query reads: its own, and those of $lookup, $graphLookup and $unionWith. */
+export function referencedCollections({ collection, pipeline }: MongoQuery): string[] {
+  const names = new Set([collection]);
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) return value.forEach(walk);
+    if (!isPlainObject(value)) return;
+    for (const [key, child] of Object.entries(value)) {
+      if ((key === "$lookup" || key === "$graphLookup") && isPlainObject(child) && typeof child.from === "string") {
+        names.add(child.from);
+      }
+      if (key === "$unionWith") {
+        const coll = typeof child === "string" ? child : isPlainObject(child) ? child.coll : null;
+        if (typeof coll === "string") names.add(coll);
+      }
+      walk(child);
+    }
+  };
+  walk(pipeline);
+  return [...names];
 }
 
 /**
@@ -251,9 +284,9 @@ export function toPlain(value: unknown): unknown {
 /** Code 50 is MaxTimeMSExpired. */
 const MONGO_TIME_LIMIT = 50;
 
-export async function runMongoQuery(database: AgentDatabaseRuntime, sql: string): Promise<QueryResult> {
+export async function runMongoQuery(database: AgentDatabaseRuntime, text: string): Promise<QueryResult> {
+  const query = parseMongoQuery(text);
   const { db, client } = await openDatabase(database);
-  const { collections, pipeline } = translateSql(sql);
 
   // An aggregate over a collection that does not exist returns no rows rather
   // than an error. Report it the way Postgres would, so the usual unknown-table
@@ -263,9 +296,9 @@ export async function runMongoQuery(database: AgentDatabaseRuntime, sql: string)
   const existing = new Set(
     (await db.listCollections({}, { nameOnly: true }).toArray()).map((collection) => collection.name),
   );
-  const missing = collections.find((name) => !existing.has(name));
+  const missing = referencedCollections(query).find((name) => !existing.has(name));
   if (missing) {
-    throw new SQLException(`relation "${missing}" does not exist`, sql);
+    throw new SQLException(`relation "${missing}" does not exist`, text);
   }
   assertTopologyPublic(client);
 
@@ -274,16 +307,18 @@ export async function runMongoQuery(database: AgentDatabaseRuntime, sql: string)
     // ponytail: rowCount is the rows kept, not the true total. Add a $count
     // facet if the UI ever needs "200 of N" for MongoDB.
     documents = await db
-      .collection(collections[0]!)
-      .aggregate([...pipeline, { $limit: MAX_RESULT_ROWS }], { maxTimeMS: QUERY_TIMEOUT_MS })
+      .collection(query.collection)
+      .aggregate([...query.pipeline, { $limit: MAX_RESULT_ROWS }], { maxTimeMS: QUERY_TIMEOUT_MS })
       .toArray();
   } catch (error) {
     if ((error as { code?: unknown })?.code === MONGO_TIME_LIMIT) {
-      throw new SQLException(`The query ran longer than ${Math.round(QUERY_TIMEOUT_MS / 1000)}s and was cancelled.`, sql);
+      throw new SQLException(`The query ran longer than ${Math.round(QUERY_TIMEOUT_MS / 1000)}s and was cancelled.`, text);
     }
     throw error;
   }
-  const rows = documents.map((document) => sanitizeRow(toPlain(document) as Record<string, unknown>));
+  // Sub-documents become dot-path columns, as in the catalog, so the table
+  // shows values rather than objects.
+  const rows = documents.map((document) => sanitizeRow(flattenDocument(toPlain(document) as Record<string, unknown>)));
   const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))];
   return { rowCount: rows.length, columns, rows };
 }
@@ -293,8 +328,8 @@ const SAMPLE_DOCUMENTS = 100;
 const MAX_FIELDS = 100;
 
 /**
- * Nested sub-documents become dot paths (`address.city`), which NoQL accepts
- * as column names. Arrays stay one field: reaching into them needs UNWIND.
+ * Nested sub-documents become dot paths (`address.city`), the way a pipeline
+ * names them. Arrays stay one field: reaching into them needs $unwind.
  */
 export function flattenDocument(document: Record<string, unknown>, prefix = ""): Record<string, unknown> {
   const flat: Record<string, unknown> = {};

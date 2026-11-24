@@ -237,15 +237,16 @@ export async function executeReadOnlyQuery(
   database: AgentDatabaseRuntime,
   sql: string,
 ): Promise<QueryResult> {
+  // A JSON pipeline, checked for writing stages by parseMongoQuery.
+  if (database.provider === "mongodb") {
+    return runMongoQuery(database, sql);
+  }
+
   assertReadOnlySql(sql);
   const statement = sql.trim().replace(/;+$/, "");
 
   if (database.provider === "sqlite") {
     return runSqliteQuery(await materializeSqlite(database), statement);
-  }
-
-  if (database.provider === "mongodb") {
-    return runMongoQuery(database, statement);
   }
 
   return runPostgresQuery(database.connectionString!, statement);
