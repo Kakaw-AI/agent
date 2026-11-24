@@ -72,7 +72,8 @@ export function normalizeDbError(error: unknown): NormalizedDbError {
       ? (error as unknown as Record<string, unknown>)
       : {};
 
-  const code = readString(source, "code");
+  // MongoDB server errors carry a numeric code.
+  const code = readString(source, "code") ?? (typeof source["code"] === "number" ? String(source["code"]) : null);
   const hint = readString(source, "hint");
   const detail = readString(source, "detail");
   const rawPosition = source["position"];

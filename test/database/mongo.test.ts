@@ -3,15 +3,27 @@ import { describe, expect, it } from "vitest";
 import {
   assertReadOnlyPipeline,
   inferColumns,
-  mongoDatabaseName,
+  parseMongoConnectionString,
   toPlain,
   translateSql,
 } from "../../src/database/mongo.js";
 
-describe("mongoDatabaseName", () => {
-  it("reads the database from the path", () => {
-    expect(mongoDatabaseName("mongodb+srv://u:p@cluster0.example.net/shop?retryWrites=true&w=majority")).toBe("shop");
-    expect(mongoDatabaseName("mongodb://u:p@h1:27017,h2:27017/sales?replicaSet=rs0&authSource=admin")).toBe("sales");
+const mongoDatabaseName = (value: string) => parseMongoConnectionString(value).database;
+
+describe("parseMongoConnectionString", () => {
+  it("reads the database and seed hosts", () => {
+    expect(parseMongoConnectionString("mongodb+srv://u:p@cluster0.example.net/shop?retryWrites=true&w=majority")).toEqual({
+      database: "shop",
+      hosts: ["cluster0.example.net"],
+    });
+    expect(parseMongoConnectionString("mongodb://u:p@h1:27017,[::1]:27018,10.0.0.5/sales?replicaSet=rs0&authSource=admin")).toEqual({
+      database: "sales",
+      hosts: ["h1", "::1", "10.0.0.5"],
+    });
+  });
+
+  it("refuses unix socket hosts, which never resolve through the network guard", () => {
+    expect(() => mongoDatabaseName("mongodb://%2Ftmp%2Fmongodb-27017.sock/admin")).toThrow(/socket/);
   });
 
   it("requires a database name", () => {
@@ -98,6 +110,13 @@ describe("inferColumns", () => {
     expect(columns.find((column) => column.name === "tags")).toMatchObject({ dataType: "array", isNullable: true });
     expect(columns.find((column) => column.name === "address.city")).toMatchObject({ dataType: "string", isNullable: false });
   });
+
+  it("drops the rarest fields of very wide documents, not the last seen", () => {
+    const wide = Object.fromEntries(Array.from({ length: 150 }, (_, i) => [`rare_${i}`, 1]));
+    const columns = inferColumns([{ ...wide, common: "x" }, { common: "y" }]);
+    expect(columns).toHaveLength(100);
+    expect(columns.map((column) => column.name)).toContain("common");
+  });
 });
 
 describe("toPlain", () => {
@@ -109,5 +128,29 @@ describe("toPlain", () => {
       at: new Date(0),
       items: [{ id: id.toHexString() }],
     });
+  });
+
+  it("redacts secret-looking fields inside nested documents", () => {
+    expect(toPlain({ profile: { name: "Ann", password: "x", sessions: [{ token: "t" }] } })).toEqual({
+      profile: { name: "Ann", password: "[redacted]", sessions: "[redacted]" },
+    });
+    expect(toPlain({ items: [{ apiKey: "k" }] })).toEqual({ items: [{ apiKey: "[redacted]" }] });
+  });
+});
+
+describe("network guard", () => {
+  it("refuses private IP literals as seed hosts in production", async () => {
+    const { executeReadOnlyQuery } = await import("../../src/database/query.js");
+    const previous = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    try {
+      for (const connectionString of ["mongodb://127.0.0.1:27017/db", "mongodb://169.254.169.254/db", "mongodb://[::1]:27017/db"]) {
+        await expect(
+          executeReadOnlyQuery({ sourceId: "s", provider: "mongodb", label: "x", connectionString }, "SELECT * FROM t"),
+        ).rejects.toThrow(/private or internal/);
+      }
+    } finally {
+      process.env.NODE_ENV = previous;
+    }
   });
 });

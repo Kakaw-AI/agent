@@ -2,10 +2,11 @@ import NoQL from "@synatic/noql";
 import { MongoClient, type Db, type Document } from "mongodb";
 import { MAX_RESULT_ROWS, MAX_SAMPLE_ROWS, QUERY_TIMEOUT_MS } from "../config.js";
 import { SQLException } from "../exceptions/SQLException.js";
-import { publicLookup } from "../net/public-host.js";
+import { assertPublicHost, isBlockedLiteral, publicLookup } from "../net/public-host.js";
 import type { AgentDatabaseRuntime, DatabaseCatalogColumn, DatabaseCatalogTable } from "../types.js";
 import {
   MAX_LISTED_VALUES,
+  SECRET_FIELD_PATTERN,
   collectSampleValues,
   completeValueList,
   normalizeName,
@@ -45,22 +46,25 @@ const ALLOWED_OPTIONS = new Set(
   ].map((name) => name.toLowerCase()),
 );
 const ALLOWED_AUTH_MECHANISMS = new Set(["DEFAULT", "SCRAM-SHA-1", "SCRAM-SHA-256"]);
-const CONNECTION_STRING = /^mongodb(?:\+srv)?:\/\/[^/?]+(?:\/([^?]*))?(?:\?(.*))?$/;
+// Not `new URL`: a replica-set string lists several host:port pairs.
+const CONNECTION_STRING = /^mongodb(?:\+srv)?:\/\/(?:[^@/?]*@)?([^/?]+)(?:\/([^?]*))?(?:\?(.*))?$/;
+
+type ParsedConnectionString = { database: string; hosts: string[] };
 
 /**
- * The database a connection string names, after checking its options.
- * Throws on anything this service will not dial.
+ * The database and seed hosts a connection string names, after checking its
+ * options. Throws on anything this service will not dial.
  */
-export function mongoDatabaseName(connectionString: string): string {
-  const match = CONNECTION_STRING.exec(connectionString.trim());
+export function parseMongoConnectionString(connectionString: string): ParsedConnectionString {
+  const match = CONNECTION_STRING.exec(connectionString);
   if (!match) {
     throw new SQLException("The connection string must start with mongodb:// or mongodb+srv://.");
   }
-  const database = decodeURIComponent(match[1] ?? "");
+  const database = decodeURIComponent(match[2] ?? "");
   if (!database) {
     throw new SQLException("The connection string must name a database, e.g. mongodb+srv://user:pass@host/shop.");
   }
-  for (const [key, value] of new URLSearchParams(match[2] ?? "")) {
+  for (const [key, value] of new URLSearchParams(match[3] ?? "")) {
     if (!ALLOWED_OPTIONS.has(key.toLowerCase())) {
       throw new SQLException(`The connection option "${key}" is not supported.`);
     }
@@ -68,13 +72,29 @@ export function mongoDatabaseName(connectionString: string): string {
       throw new SQLException(`The authentication mechanism "${value}" is not supported. Use SCRAM (username and password).`);
     }
   }
-  return database;
+  const hosts = match[1]!.split(",").map((entry) => {
+    const host = hostOf(decodeURIComponent(entry));
+    // The driver reads a host ending in .sock as a unix socket path.
+    if (host.includes("/") || host.endsWith(".sock")) {
+      throw new SQLException("Unix socket connections are not supported.");
+    }
+    return host;
+  });
+  return { database, hosts };
 }
 
 // One client per connection string, least-recently-used first, bounded like
 // the Postgres pools in query.ts.
 const CLIENT_MAX = 32;
 const clients = new Map<string, MongoClient>();
+/** Clients whose replica set announced a private address, with that address. */
+const refused = new WeakMap<MongoClient, string>();
+
+function dropClient(connectionString: string) {
+  const client = clients.get(connectionString);
+  clients.delete(connectionString);
+  void client?.close().catch(() => undefined);
+}
 
 function getClient(connectionString: string): MongoClient {
   const existing = clients.get(connectionString);
@@ -89,28 +109,61 @@ function getClient(connectionString: string): MongoClient {
     connectTimeoutMS: 10_000,
     serverSelectionTimeoutMS: 10_000,
     readPreference: "secondaryPreferred",
-    // Every socket the driver opens, SRV targets included, resolves through
-    // the private-network guard.
+    // Every host name the driver dials, SRV targets included, resolves
+    // through the private-network guard.
     lookup: publicLookup,
+  });
+  // A replica set announces its members, and an IP literal never reaches
+  // `lookup`. A server that announces a private address loses its client.
+  // ponytail: the driver opens the announced member's monitor socket right
+  // after this event, so one heartbeat can reach it; queries cannot (see
+  // assertTopologyPublic). Close that gap with a SOCKS5 shim on proxyHost if
+  // a blind probe ever matters.
+  client.on("serverOpening", (event) => {
+    const host = hostOf(event.address);
+    if (isBlockedLiteral(host)) {
+      refused.set(client, host);
+      dropClient(connectionString);
+    }
   });
   clients.set(connectionString, client);
 
   while (clients.size > CLIENT_MAX) {
-    const oldest = clients.entries().next();
+    const oldest = clients.keys().next();
     if (oldest.done) break;
-    clients.delete(oldest.value[0]);
-    void oldest.value[1].close().catch(() => undefined);
+    dropClient(oldest.value);
   }
   return client;
 }
 
-function openDatabase(database: AgentDatabaseRuntime): Db {
-  const connectionString = database.connectionString;
+/** `host:port` or `[ipv6]:port` to the bare host. */
+function hostOf(address: string): string {
+  const bracketed = /^\[([^\]]+)\]/.exec(address);
+  return bracketed ? bracketed[1]! : address.replace(/:\d+$/, "");
+}
+
+/** Refuses to run anything on a client whose replica set announced a private address. */
+function assertTopologyPublic(client: MongoClient) {
+  const host = refused.get(client);
+  if (host) {
+    throw new SQLException(`"${host}" is a private or internal address and cannot be used here.`);
+  }
+}
+
+async function openDatabase(database: AgentDatabaseRuntime): Promise<{ db: Db; client: MongoClient }> {
+  const connectionString = database.connectionString?.trim();
   if (!connectionString) {
     throw new SQLException("MongoDB runtime is missing connectionString.");
   }
-  const name = mongoDatabaseName(connectionString);
-  return getClient(connectionString).db(name);
+  const { database: name, hosts } = parseMongoConnectionString(connectionString);
+  // Seed hosts given as IP literals skip `lookup`, so check them up front.
+  await Promise.all(hosts.map(assertPublicHost));
+  const client = getClient(connectionString);
+  return { db: client.db(name), client };
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype;
 }
 
 /** Stages and operators that write, or run server-side JavaScript. */
@@ -121,7 +174,7 @@ export function assertReadOnlyPipeline(value: unknown): void {
     value.forEach(assertReadOnlyPipeline);
     return;
   }
-  if (value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype) {
+  if (isPlainObject(value)) {
     for (const [key, child] of Object.entries(value)) {
       if (BLOCKED_OPERATORS.has(key)) {
         throw new SQLException(`Unsafe operation ${key} was blocked before execution.`);
@@ -138,13 +191,24 @@ export function translateSql(sql: string): { collections: string[]; pipeline: Do
   return { collections: parsed.collections, pipeline: parsed.pipeline as Document[] };
 }
 
-/** BSON values to what the rest of the agent (and JSON) understands. */
+/**
+ * BSON values to what the rest of the agent (and JSON) understands. Documents
+ * stay nested, so fields named like secrets are redacted at every depth, not
+ * only at the top level `sanitizeRow` sees.
+ */
 export function toPlain(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(toPlain);
   if (value === null || typeof value !== "object" || value instanceof Date) return value;
+  if (isPlainObject(value)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, child]) => [key, SECRET_FIELD_PATTERN.test(key) ? "[redacted]" : toPlain(child)]),
+    );
+  }
   switch ((value as { _bsontype?: string })._bsontype) {
     case "ObjectId":
       return (value as { toHexString(): string }).toHexString();
+    // ponytail: Decimal128 and Long past 2^53 lose precision as numbers.
+    // Return the string form if money columns need exact cents.
     case "Decimal128":
     case "Long":
     case "Double":
@@ -152,20 +216,23 @@ export function toPlain(value: unknown): unknown {
       return Number(String(value));
     case "Binary":
       return `[binary:${(value as { length(): number }).length()}]`;
-    case undefined:
-      return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, toPlain(child)]));
     default:
       return String(value);
   }
 }
 
+/** Code 50 is MaxTimeMSExpired. */
+const MONGO_TIME_LIMIT = 50;
+
 export async function runMongoQuery(database: AgentDatabaseRuntime, sql: string): Promise<QueryResult> {
-  const db = openDatabase(database);
+  const { db, client } = await openDatabase(database);
   const { collections, pipeline } = translateSql(sql);
 
   // An aggregate over a collection that does not exist returns no rows rather
   // than an error. Report it the way Postgres would, so the usual unknown-table
   // repair (including the free near-match fix) applies.
+  // ponytail: one listCollections round trip per query. Check against the
+  // catalog instead if query latency on MongoDB ever shows it.
   const existing = new Set(
     (await db.listCollections({}, { nameOnly: true }).toArray()).map((collection) => collection.name),
   );
@@ -173,25 +240,30 @@ export async function runMongoQuery(database: AgentDatabaseRuntime, sql: string)
   if (missing) {
     throw new SQLException(`relation "${missing}" does not exist`, sql);
   }
+  assertTopologyPublic(client);
 
-  // ponytail: rowCount is the rows kept, not the true total. Add a $count
-  // facet if the UI ever needs "200 of N" for MongoDB.
-  const documents = await db
-    .collection(collections[0]!)
-    .aggregate([...pipeline, { $limit: MAX_RESULT_ROWS }], { maxTimeMS: QUERY_TIMEOUT_MS })
-    .toArray();
+  let documents;
+  try {
+    // ponytail: rowCount is the rows kept, not the true total. Add a $count
+    // facet if the UI ever needs "200 of N" for MongoDB.
+    documents = await db
+      .collection(collections[0]!)
+      .aggregate([...pipeline, { $limit: MAX_RESULT_ROWS }], { maxTimeMS: QUERY_TIMEOUT_MS })
+      .toArray();
+  } catch (error) {
+    if ((error as { code?: unknown })?.code === MONGO_TIME_LIMIT) {
+      throw new SQLException(`The query ran longer than ${Math.round(QUERY_TIMEOUT_MS / 1000)}s and was cancelled.`, sql);
+    }
+    throw error;
+  }
   const rows = documents.map((document) => sanitizeRow(toPlain(document) as Record<string, unknown>));
   const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))];
   return { rowCount: rows.length, columns, rows };
 }
 
 const SAMPLE_DOCUMENTS = 100;
-/** ponytail: wide documents are cut here; raise it or subset the catalog if real sources hit it. */
+/** ponytail: the rarest fields past this are dropped; subset the catalog instead if real sources hit it. */
 const MAX_FIELDS = 100;
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype;
-}
 
 /**
  * Nested sub-documents become dot paths (`address.city`), which NoQL accepts
@@ -225,7 +297,11 @@ function bsonTypeName(value: unknown): string | null {
   return bsonType ? bsonType.toLowerCase() : "object";
 }
 
-/** Columns from sampled documents: the most common type wins, and a field missing from any sample is nullable. */
+/**
+ * Columns from sampled documents: the most common type wins, a field missing
+ * from any sample is nullable, and when there are too many fields the rarest
+ * are dropped. `_id` comes first, the rest keep the order they first appeared in.
+ */
 export function inferColumns(documents: Array<Record<string, unknown>>): Array<Omit<DatabaseCatalogColumn, "sampleValues">> {
   const fields = new Map<string, { types: Map<string, number>; present: number }>();
   for (const document of documents) {
@@ -240,7 +316,13 @@ export function inferColumns(documents: Array<Record<string, unknown>>): Array<O
     }
   }
 
-  const ordered = [...fields.keys()].sort((a, b) => (a === "_id" ? -1 : b === "_id" ? 1 : 0)).slice(0, MAX_FIELDS);
+  const firstSeen = [...fields.keys()];
+  const kept = new Set(
+    [...firstSeen]
+      .sort((a, b) => (a === "_id" ? -1 : b === "_id" ? 1 : fields.get(b)!.present - fields.get(a)!.present))
+      .slice(0, MAX_FIELDS),
+  );
+  const ordered = firstSeen.filter((path) => kept.has(path)).sort((a, b) => (a === "_id" ? -1 : b === "_id" ? 1 : 0));
   return ordered.map((path, index) => {
     const field = fields.get(path)!;
     const dataType = [...field.types.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "null";
@@ -271,10 +353,11 @@ async function listMongoValues(db: Db, collection: string, path: string): Promis
 }
 
 export async function introspectMongo(database: AgentDatabaseRuntime): Promise<DatabaseCatalogTable[]> {
-  const db = openDatabase(database);
+  const { db, client } = await openDatabase(database);
   const collections = (await db.listCollections({}, { nameOnly: false }).toArray())
     .filter((collection) => !collection.name.startsWith("system."))
     .sort((a, b) => a.name.localeCompare(b.name));
+  assertTopologyPublic(client);
 
   const tables: DatabaseCatalogTable[] = [];
   for (const { name, type } of collections) {

@@ -18,6 +18,11 @@
       "docs": ["chat/controls.mdx"]
     },
     {
+      "paths": ["src/database/mongo.ts", "src/prompts/database/MongoSqlPromptBuilder.ts"],
+      "docs": ["data/mongodb.mdx"],
+      "architecture": ["03-agent.md"]
+    },
+    {
       "paths": ["src/database/**", "src/net/public-host.ts"],
       "docs": ["privacy-and-security.mdx", "data/schema-sync.mdx", "reference/limits.mdx"],
       "architecture": ["05-security-and-operations.md", "04-data-and-sync.md"]

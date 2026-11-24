@@ -54,6 +54,15 @@ export function isBlockedAddress(address: string): boolean {
   return blocked.check(address, family === 6 ? "ipv6" : "ipv4");
 }
 
+/**
+ * An IP literal the guard refuses. Sockets skip `lookup` for IP literals, so a
+ * client that dials hosts it did not resolve itself (MongoDB replica-set
+ * members a server announces) has to check them here.
+ */
+export function isBlockedLiteral(host: string): boolean {
+  return guardEnabled() && isIP(host) !== 0 && isBlockedAddress(host);
+}
+
 function privateHostError(host: string): Error {
   return new Error(
     `"${host}" is a private or internal address and cannot be used here.`,
