@@ -107,17 +107,43 @@ function quoteIdentifier(name: string) {
   return `"${name.replace(/"/g, '""')}"`;
 }
 
-async function storedValues(database: AgentDatabaseRuntime, table: DatabaseCatalogTable, column: string): Promise<string[]> {
+/**
+ * Distinct values of a column: a sample of up to 100, or with `match` the
+ * ones equal to or LIKE the literal, ignoring case. The sample alone cannot
+ * show whether a name exists among thousands, so the literal is looked up
+ * directly first.
+ */
+async function storedValues(
+  database: AgentDatabaseRuntime,
+  table: DatabaseCatalogTable,
+  column: string,
+  match?: { operator: "=" | "like"; literal: string },
+): Promise<string[]> {
   const tableName =
     database.provider === "postgresql" && table.schemaName
       ? `${quoteIdentifier(table.schemaName)}.${quoteIdentifier(table.name)}`
       : quoteIdentifier(table.name);
   const columnName = quoteIdentifier(column);
+  // NoQL's LIKE ignores case and anchors a pattern without %, and it reads a
+  // quoted name inside LOWER() as a string, so MongoDB gets a bare LIKE.
+  const where = !match
+    ? `${columnName} IS NOT NULL`
+    : database.provider === "mongodb"
+      ? `${columnName} LIKE ${quoteLiteral(match.literal)}`
+      : `LOWER(${columnName}) ${match.operator === "like" ? "LIKE" : "="} ${quoteLiteral(match.literal.toLowerCase())}`;
   const result = await executeReadOnlyQuery(
     database,
-    `SELECT DISTINCT ${columnName} AS value FROM ${tableName} WHERE ${columnName} IS NOT NULL LIMIT 100`,
+    `SELECT DISTINCT ${columnName} AS value FROM ${tableName} WHERE ${where} LIMIT ${match ? 5 : 100}`,
   );
   return result.rows.map((row) => String(row.value));
+}
+
+async function found(...args: Parameters<typeof storedValues>): Promise<string[]> {
+  try {
+    return await storedValues(...args);
+  } catch {
+    return [];
+  }
 }
 
 function likeToRegExp(pattern: string): RegExp {
@@ -135,7 +161,8 @@ const quoteLiteral = (value: string) => `'${value.replace(/'/g, "''")}'`;
  * When the only difference is case or spacing the literal is swapped for the
  * stored value and the query runs again, with no model call. Otherwise the
  * model rewrites the query, this time seeing the values the column holds.
- * A filter whose value does exist means the result really is empty.
+ * When every filtered value exists, a joined query gets one rewrite aimed at
+ * the join; otherwise the result really is empty.
  */
 export async function checkValues(state: State, config: NodeConfig) {
   const { request, step } = runtime(config, "checkValues");
@@ -148,6 +175,7 @@ export async function checkValues(state: State, config: NodeConfig) {
   let sql = state.sql;
   const corrections: Array<{ from: string; to: string; stage: string }> = [];
   const mismatches: string[] = [];
+  const matched: string[] = [];
 
   for (const filter of filters.slice(0, MAX_PROBES)) {
     const target = resolveFilterTable(state.sql, filter, request.knowledge);
@@ -155,23 +183,30 @@ export async function checkValues(state: State, config: NodeConfig) {
     // names look sensitive, as the row sanitizer does.
     if (!target || SECRET_FIELD_PATTERN.test(target.column)) continue;
 
-    let values: string[];
+    let sample: string[];
     try {
-      values = await storedValues(request.database, target.table, target.column);
+      sample = await storedValues(request.database, target.table, target.column);
     } catch {
       continue;
     }
 
     for (const literal of filter.literals) {
+      const direct = await found(request.database, target.table, target.column, { operator: filter.operator, literal });
+      const values = [...new Set([...direct, ...sample])];
       if (filter.operator === "like") {
-        if (!values.some((value) => likeToRegExp(literal).test(value))) {
+        if (direct.length > 0) {
+          matched.push(`${target.table.name}.${target.column} LIKE ${quoteLiteral(literal)} matches stored values (ignoring case): ${direct.map(quoteLiteral).join(", ")}.`);
+        } else if (!values.some((value) => likeToRegExp(literal).test(value))) {
           mismatches.push(
             `No value in ${target.table.name}.${target.column} matches LIKE ${quoteLiteral(literal)}. Stored values include: ${values.slice(0, MAX_VALUES_SHOWN).map(quoteLiteral).join(", ")}.`,
           );
         }
         continue;
       }
-      if (values.includes(literal)) continue;
+      if (values.includes(literal)) {
+        matched.push(`${target.table.name}.${target.column} holds ${quoteLiteral(literal)}.`);
+        continue;
+      }
 
       const normalized = literal.trim().toLowerCase();
       const caseOnly = values.filter((value) => value.trim().toLowerCase() === normalized);
@@ -212,6 +247,28 @@ export async function checkValues(state: State, config: NodeConfig) {
         feedback: {
           sql,
           issues: ["The query ran but returned no rows because a filter names a value the column does not contain.", ...mismatches],
+        },
+      } satisfies Update,
+    });
+  }
+
+  // The filtered values exist, so in a joined query the rows were most likely
+  // lost in the join: keys of different types (an ObjectId against its string
+  // form) or formats never match. One rewrite, then the empty result stands.
+  if (corrections.length === 0 && matched.length > 0 && /\bjoin\b/i.test(state.sql) && state.generations < MAX_GENERATIONS) {
+    return new Command({
+      goto: "generate",
+      update: {
+        valuesChecked: true,
+        repairHistory: [{ ...repairHistory[0], matched }],
+        steps: [...steps, step("The filtered values exist; checking how the tables are joined...")],
+        feedback: {
+          sql,
+          issues: [
+            "The query ran but returned no rows, although the values it filters on exist:",
+            ...matched,
+            "So the rows are lost elsewhere, most likely in a join whose two sides never hold equal values (different types or formats of the key), or in another filter. Fix that part; if the query is right, return it unchanged.",
+          ],
         },
       } satisfies Update,
     });

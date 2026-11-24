@@ -1,4 +1,5 @@
 import { AIMessage, AIMessageChunk, type BaseMessage } from "@langchain/core/messages";
+import Database from "better-sqlite3";
 import { copyFileSync, mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -52,10 +53,17 @@ const draft = (sql: string, rationale = "", webQuery = "") =>
   ({ needsClarification: false, clarifyingQuestion: "", options: [], sql, rationale, needsWeb: Boolean(webQuery), webQuery });
 
 let base: Omit<AgentRunRequest, "message" | "history">;
+/** An order date the value check's 100-value sample does not include. */
+let rareDate: string;
 
 beforeAll(async () => {
   const seed = join(mkdtempSync(join(tmpdir(), "kakaw-graph-test-")), "shop.sqlite");
   seedShopDatabase(seed);
+  const db = new Database(seed, { readonly: true });
+  const dates = (sql: string) => (db.prepare(sql).all() as Array<{ d: string }>).map((row) => row.d);
+  const sample = new Set(dates("SELECT DISTINCT order_date AS d FROM orders WHERE order_date IS NOT NULL LIMIT 100"));
+  rareDate = dates("SELECT DISTINCT order_date AS d FROM orders").find((date) => !sample.has(date))!;
+  db.close();
   const database = { sourceId: "graph-test", provider: "sqlite" as const, label: "Shop", sqliteObjectKey: "graph-test/shop.sqlite" };
   mkdirSync(dirname(cacheFilePath(database.sqliteObjectKey)), { recursive: true });
   copyFileSync(seed, cacheFilePath(database.sqliteObjectKey));
@@ -158,6 +166,27 @@ describe("agent graph", () => {
 
     expect(promptsFor(SqlDraftSchema)[1]).toContain("'Asia Pacific'");
     expect(find(events, "sql_result")?.rows).toEqual([{ customers: 15 }]);
+  });
+
+  it("looks a filtered value up directly, and points a joined query that loses it at the join", async () => {
+    const badJoin = `SELECT o.id FROM orders o JOIN customers c ON c.email = o.status WHERE o.order_date LIKE '${rareDate}%'`;
+    script(SqlDraftSchema, draft(badJoin), draft(`SELECT o.id FROM orders o JOIN customers c ON c.id = o.customer_id WHERE o.order_date LIKE '${rareDate}%'`));
+    const events = await run("Which orders were placed on that day?");
+
+    expect(promptsFor(SqlDraftSchema)[1]).toContain("although the values it filters on exist");
+    expect(promptsFor(SqlDraftSchema)[1]).not.toContain("No value in");
+    expect(find(events, "sql_result")?.rowCount).toBeGreaterThan(0);
+  });
+
+  it("answers from the last result when the rewrite times out", async () => {
+    const badJoin = `SELECT o.id FROM orders o JOIN customers c ON c.email = o.status WHERE o.order_date LIKE '${rareDate}%'`;
+    script(SqlDraftSchema, draft(badJoin), new Error("LLM call timed out after 90000ms"));
+    const events = await run("Which orders were placed on that day?");
+
+    expect(find(events, "message_failed")).toBeUndefined();
+    expect(find(events, "message_completed")?.content).toBeTruthy();
+    // Not learned as a good plan: its rewrite was still pending.
+    expect(trace(events).toolCalls.some((call: any) => call.tool === "sql_execution")).toBe(false);
   });
 
   it("corrects a misspelled column without another draft", async () => {

@@ -44,9 +44,10 @@ export async function accept(state: State, config: NodeConfig): Promise<Update> 
     // The query that produced the answer. Recorded here and only here, so
     // query memory never learns from an attempt that was later rejected.
     // A web-assisted answer is not reusable from the SQL alone, so query memory
-    // does not learn it either.
+    // does not learn it either. Nor a result kept only because its rewrite
+    // failed (feedback still pending).
     toolCalls:
-      state.kind === "chart_previous" || !state.sql || state.webQuery
+      state.kind === "chart_previous" || !state.sql || state.webQuery || state.feedback
         ? []
         : [{ tool: "sql_execution", sql: state.sql, rowCount: state.rowCount }],
   };

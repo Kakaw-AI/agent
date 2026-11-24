@@ -52,6 +52,14 @@ describe.skipIf(!baseUrl)("MongoDB end to end", () => {
     expect(sync.schemaFingerprint).toMatch(/^[0-9a-f]{64}$/);
   });
 
+  it("matches LIKE without case, with or without a LOWER the model added", async () => {
+    const result = await executeReadOnlyQuery(database, "SELECT name FROM customers WHERE LOWER(name) LIKE '%an%'");
+    expect(result.rows).toEqual([{ name: "Ann" }]);
+    // The value check's direct lookup on MongoDB: an anchored, case-blind LIKE.
+    const exact = await executeReadOnlyQuery(database, `SELECT DISTINCT "status" AS value FROM "orders" WHERE "status" LIKE 'shipped' LIMIT 5`);
+    expect(exact.rows).toEqual([{ value: "Shipped" }]);
+  });
+
   it("answers a grouped question", async () => {
     const result = await executeReadOnlyQuery(
       database,

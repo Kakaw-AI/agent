@@ -12,7 +12,7 @@ export class MongoSqlPromptBuilder extends BaseSqlPromptBuilder {
       "Use one read-only SELECT statement only. Never produce INSERT, UPDATE, DELETE or other write/admin commands.",
       "Each catalog table is a collection. Reference it by its plain name, with no schema prefix.",
       "Fields of nested documents appear in the catalog as dot paths such as address.city. Always wrap a dot path in backticks: `address.city`. Never write it unquoted, or it is read as a table alias.",
-      "Field names and string values are case-sensitive.",
+      "Field names and string values are case-sensitive, except with LIKE, which ignores case. Search text with field LIKE '%term%' and never wrap the field in LOWER or UPPER.",
       "Alias every function, aggregate and subquery: SUM(total) AS total_revenue, (SELECT ...) AS t.",
       "WHERE cannot use a SELECT alias; repeat the expression instead.",
       "IN (SELECT ...) is not supported. Use a JOIN instead.",

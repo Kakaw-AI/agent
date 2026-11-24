@@ -151,6 +151,18 @@ export async function generate(state: State, config: NodeConfig) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "SQL generation failed.";
+    // A rewrite that times out or fails still leaves the last query's result,
+    // which is a valid (if imperfect) answer, as when the draft budget runs out.
+    const lastRan = state.toolCalls.some((call) => call.tool === "sql_attempt" && call.sql === state.sql);
+    if (feedback && lastRan && !signal?.aborted) {
+      return new Command({
+        goto: "accept",
+        update: {
+          tokenUsage: error instanceof LlmReplyError ? error.tokenUsage : null,
+          steps: [...steps, step(`The rewrite failed (${message}); answering from the last query's result.`)],
+        } satisfies Update,
+      });
+    }
     return new Command({
       goto: "finalize",
       update: {

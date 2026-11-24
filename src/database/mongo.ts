@@ -25,9 +25,25 @@ import type { QueryResult } from "./types.js";
  * MONGODB-AWS and MONGODB-OIDC would authenticate with this process's own
  * cloud credentials, tls*File options name files on this machine, and proxy
  * options would dial through a host the network guard never sees.
+ * Pool and timeout options are accepted because app connection strings often
+ * carry them; the client's own settings (getClient) win over the URI's.
  */
 const ALLOWED_OPTIONS = new Set(
   [
+    "maxPoolSize",
+    "minPoolSize",
+    "maxIdleTimeMS",
+    "maxConnecting",
+    "waitQueueTimeoutMS",
+    "socketTimeoutMS",
+    "serverSelectionTimeoutMS",
+    "heartbeatFrequencyMS",
+    "localThresholdMS",
+    "maxStalenessSeconds",
+    "readPreferenceTags",
+    "journal",
+    "wtimeoutMS",
+    "zlibCompressionLevel",
     "authSource",
     "authMechanism",
     "replicaSet",
@@ -184,9 +200,20 @@ export function assertReadOnlyPipeline(value: unknown): void {
   }
 }
 
+/**
+ * NoQL turns `LOWER(x) LIKE 'y'` into a match on a field named "undefined",
+ * which silently finds nothing. Its LIKE already ignores case, so the wrapper
+ * is dropped.
+ */
+const CASED_LIKE = /\b(?:LOWER|UPPER)\s*\(\s*([^()]+?)\s*\)(?=\s+(?:NOT\s+)?LIKE\b)/gi;
+
 /** SQL to the collection it runs against and the pipeline to run. */
 export function translateSql(sql: string): { collections: string[]; pipeline: Document[] } {
-  const parsed = NoQL.makeMongoAggregate(sql, { unsetId: true });
+  const parsed = NoQL.makeMongoAggregate(sql.replace(CASED_LIKE, "$1"), { unsetId: true });
+  // Any other condition NoQL could not place lands on that same field.
+  if (JSON.stringify(parsed.pipeline).includes('"undefined":')) {
+    throw new SQLException("A WHERE condition could not be translated for MongoDB. Compare a plain field, not an expression, with LIKE or =.");
+  }
   assertReadOnlyPipeline(parsed.pipeline);
   return { collections: parsed.collections, pipeline: parsed.pipeline as Document[] };
 }

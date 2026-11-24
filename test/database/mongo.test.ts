@@ -38,6 +38,10 @@ describe("parseMongoConnectionString", () => {
     expect(mongoDatabaseName("mongodb://h/db?authMechanism=SCRAM-SHA-256")).toBe("db");
   });
 
+  it("accepts the pool and timeout options app connection strings carry", () => {
+    expect(mongoDatabaseName("mongodb+srv://u:p@h/db?retryWrites=true&w=majority&maxPoolSize=20&socketTimeoutMS=45000")).toBe("db");
+  });
+
   it("refuses other schemes", () => {
     expect(() => mongoDatabaseName("postgresql://h/db")).toThrow(/mongodb:\/\//);
   });
@@ -91,6 +95,13 @@ describe("translateSql", () => {
     expect(collections).toEqual(["orders"]);
     // The value check (values.ts) quotes this way, and so do models used to Postgres.
     expect(pipeline[0]).toEqual({ $match: { status: { $eq: "paid" } } });
+  });
+
+  it("drops LOWER/UPPER around a LIKE operand, which NoQL mistranslates and its LIKE does not need", () => {
+    const { pipeline } = translateSql("SELECT p.name FROM customers p WHERE LOWER(p.fullName) LIKE '%rowan sami%' AND UPPER(`p.tag`) NOT LIKE 'X%'");
+    const text = JSON.stringify(pipeline);
+    expect(text).not.toContain("undefined");
+    expect(text).toContain('"$regex":"rowan sami","$options":"i"');
   });
 
   it("raises a parse error the repair loop can show the model", () => {
