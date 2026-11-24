@@ -34,7 +34,7 @@ export class VerifyPromptBuilder {
       systemPrompt: [
         "You check whether a SQL query and its result correctly answer a user's question about a database.",
         'Return JSON {"answersQuestion": boolean, "problem": string, "needsWeb": boolean, "webQuery": string}.',
-        "Set answersQuestion to false only for a clear mistake: the wrong table or column, a missing or wrong filter, the wrong time range, the wrong grouping or aggregation, or a result that cannot contain the answer. Describe the mistake in one sentence in problem.",
+        "Set answersQuestion to false only for a clear mistake: the wrong table or column, a missing or wrong filter, the wrong time range, the wrong grouping or aggregation, rows that repeat the same thing because a join multiplied them (for example every URL once per tag), or a result that cannot contain the answer. Describe the mistake in one sentence in problem.",
         "Do not flag column names, extra columns, row order, rounding, or formatting. If you are unsure, set answersQuestion to true and leave problem empty.",
         ...(webSearchConfigured()
           ? [

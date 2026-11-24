@@ -68,6 +68,8 @@ export const AgentState = new StateSchema({
   freeRepairs: value<number>(() => 0),
   valuesChecked: value<boolean>(() => false),
   verifyRetries: value<number>(() => 0),
+  /** A result full of repeated rows already got its one rewrite. */
+  duplicatesChecked: value<boolean>(() => false),
 
   rows: value<Rows>(() => []),
   columns: value<string[]>(() => []),

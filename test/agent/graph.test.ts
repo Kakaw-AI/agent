@@ -244,6 +244,56 @@ describe("agent graph", () => {
     expect(promptsFor(SqlDraftSchema)).toHaveLength(1);
   });
 
+  it("rewrites a query whose joins repeat the same rows", async () => {
+    const fanned = "SELECT o.ship_mode FROM orders o JOIN customers c ON c.id = o.customer_id";
+    script(SqlDraftSchema, draft(fanned), draft("SELECT DISTINCT ship_mode FROM orders"));
+    const events = await run("Which shipping modes do customers use?");
+
+    expect(promptsFor(SqlDraftSchema)[1]).toMatch(/exact copies of another row/);
+    expect(promptsFor(VerifySchema)).toHaveLength(1);
+    const rows = find(events, "sql_result")?.rows;
+    expect(rows.length).toBe(new Set(rows.map((r: any) => r.ship_mode)).size);
+  });
+
+  it("shows each row once when the rewrite still repeats them", async () => {
+    const fanned = "SELECT o.ship_mode FROM orders o JOIN customers c ON c.id = o.customer_id";
+    script(SqlDraftSchema, draft(fanned), draft(fanned));
+    const events = await run("Which shipping modes do customers use?");
+
+    expect(promptsFor(SqlDraftSchema)).toHaveLength(2);
+    const result = find(events, "sql_result");
+    expect(result?.rows.length).toBe(new Set(result?.rows.map((r: any) => r.ship_mode)).size);
+    expect(result?.rowCount).toBe(result?.rows.length);
+  });
+
+  it("rewrites a list that repeats its owner's columns on every row", async () => {
+    const repeated = "SELECT c.id, c.name, c.region, o.id AS order_id FROM customers c JOIN orders o ON o.customer_id = c.id WHERE c.id = (SELECT customer_id FROM orders GROUP BY customer_id HAVING COUNT(*) >= 3 ORDER BY customer_id LIMIT 1)";
+    script(SqlDraftSchema, draft(repeated), draft("SELECT o.id AS order_id, o.order_date FROM orders o WHERE o.customer_id = (SELECT customer_id FROM orders GROUP BY customer_id HAVING COUNT(*) >= 3 ORDER BY customer_id LIMIT 1)"));
+    const events = await run("Which orders did our first regular customer place?");
+
+    expect(promptsFor(SqlDraftSchema)[1]).toMatch(/The columns id, name, region hold the same value/);
+    expect(Object.keys(find(events, "sql_result")?.rows[0])).toEqual(["order_id", "order_date"]);
+  });
+
+  it("shows the owner's columns on the first row only when the rewrite still repeats them", async () => {
+    const repeated = "SELECT c.id, c.name, c.region, o.id AS order_id FROM customers c JOIN orders o ON o.customer_id = c.id WHERE c.id = (SELECT customer_id FROM orders GROUP BY customer_id HAVING COUNT(*) >= 3 ORDER BY customer_id LIMIT 1)";
+    script(SqlDraftSchema, draft(repeated), draft(repeated));
+    const events = await run("Which orders did our first regular customer place?");
+
+    const rows = find(events, "sql_result")?.rows;
+    expect(rows[0].name).toBeTruthy();
+    expect(rows.slice(1).every((row: any) => row.id === null && row.name === null && row.region === null)).toBe(true);
+    expect(new Set(rows.map((row: any) => row.order_id)).size).toBe(rows.length);
+  });
+
+  it("leaves repeated values alone in a query without a join", async () => {
+    script(SqlDraftSchema, draft("SELECT category FROM products"));
+    const events = await run("List the category of every product.");
+
+    expect(promptsFor(SqlDraftSchema)).toHaveLength(1);
+    expect(find(events, "sql_result")?.rows.length).toBeGreaterThan(new Set(find(events, "sql_result")?.rows.map((r: any) => r.category)).size);
+  });
+
   it("rewrites once when the review flags the result, and does not review the rewrite", async () => {
     script(
       SqlDraftSchema,

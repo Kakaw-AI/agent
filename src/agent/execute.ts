@@ -15,7 +15,7 @@ import {
   validateVisualizationResult,
 } from "../graph/visualization.js";
 import { webSearchConfigured } from "../net/web-search.js";
-import { retryOrGiveUp } from "./plan.js";
+import { MAX_GENERATIONS, retryOrGiveUp } from "./plan.js";
 import { type NodeConfig, runtime, type State, type Update } from "./state.js";
 
 /** In-process identifier fixes per run; they cost no model call but must not loop. */
@@ -152,6 +152,79 @@ export function looksEmpty(rows: Array<Record<string, unknown>>): boolean {
   return values.length > 0 && values.every((value) => value === null || value === 0 || value === "0");
 }
 
+/** Exact copies among the returned rows. */
+export function countDuplicateRows(rows: Array<Record<string, unknown>>): number {
+  const seen = new Set<string>();
+  let duplicates = 0;
+  for (const row of rows) {
+    const key = JSON.stringify(Object.values(row));
+    if (seen.has(key)) duplicates += 1;
+    else seen.add(key);
+  }
+  return duplicates;
+}
+
+/** Each row once, in the order it first came back. */
+export function dropDuplicateRows(rows: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = JSON.stringify(Object.values(row));
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * How a joined result repeats itself.
+ *
+ * Joining two lists of one thing (a performer's URLs and her tags) multiplies
+ * them: every URL comes back once per tag, as exact copies. Joining one list
+ * repeats the thing's own columns (id, name, country, a long bio) on every row
+ * of the list. Both are noise, not data. A query without a join is left
+ * alone: there a repeated value is an answer (the same price on two products).
+ *
+ * `duplicates` counts exact copies when they are at least a fifth of the
+ * rows; `constantColumns` lists the columns that hold one non-null value on
+ * every row, when there are at least two of them beside a column that varies.
+ */
+export function repeatedRows(
+  sql: string,
+  columns: string[],
+  rows: Array<Record<string, unknown>>,
+): { duplicates: number; constantColumns: string[] } {
+  if (!/\bjoin\b/i.test(sql) || rows.length < 3) return { duplicates: 0, constantColumns: [] };
+  const copies = countDuplicateRows(rows);
+  const duplicates = copies >= 2 && copies * 5 >= rows.length ? copies : 0;
+  const first = rows[0];
+  const constant = columns.filter(
+    (column) => first[column] != null && rows.every((row) => JSON.stringify(row[column]) === JSON.stringify(first[column])),
+  );
+  const constantColumns = constant.length >= 2 && constant.length < columns.length ? constant : [];
+  return { duplicates, constantColumns };
+}
+
+/**
+ * The deterministic clean-up after the model's rewrite, so a model that
+ * ignores the feedback still cannot show a repeating table. On a joined
+ * result: exact copies are dropped, and columns that hold one value on every
+ * remaining row keep it on the first row only. The first row still carries
+ * every value, so the answer can name them.
+ */
+export function cleanRepeatedRows(
+  sql: string,
+  columns: string[],
+  rows: Array<Record<string, unknown>>,
+): { rows: Array<Record<string, unknown>>; removed: number; blanked: string[] } {
+  if (!/\bjoin\b/i.test(sql)) return { rows, removed: 0, blanked: [] };
+  const unique = dropDuplicateRows(rows);
+  const blanked = repeatedRows(sql, columns, unique).constantColumns;
+  const cleaned = blanked.length === 0
+    ? unique
+    : unique.map((row, i) => (i === 0 ? row : { ...row, ...Object.fromEntries(blanked.map((column) => [column, null])) }));
+  return { rows: cleaned, removed: rows.length - unique.length, blanked };
+}
+
 /** A result already checked once (cached or from memory) is not checked again. */
 function shouldVerify(state: State): boolean {
   return VERIFY_RESULTS && !state.sqlFromCache && state.verifyRetries === 0;
@@ -254,6 +327,42 @@ export async function execute(state: State, config: NodeConfig) {
     // as "sql_execution", which is what query memory learns from.
     toolCalls: [{ tool: "sql_attempt", sql, rowCount: result.rowCount }],
   };
+
+  // A joined result that repeats itself gets one rewrite with the reason, so
+  // the SQL query memory learns is the clean one. Whatever comes back is then
+  // cleaned in code below.
+  const repeated = repeatedRows(sql, result.columns, result.rows);
+  const issues = [
+    ...(repeated.duplicates > 0
+      ? [`${repeated.duplicates} of the ${result.rows.length} rows are exact copies of another row: the joins multiply rows. Join at most one list table (URLs, tags, aliases, items) per query level and aggregate each other list in its own subquery, or select only the columns the question asks for, so every row is different.`]
+      : []),
+    ...(repeated.constantColumns.length > 0
+      ? [`The columns ${repeated.constantColumns.join(", ")} hold the same value on all ${result.rows.length} rows: they describe one thing and are repeated once per row of a joined list. Return them once: select only the list's own columns, or aggregate the list into one row.`]
+      : []),
+  ];
+  if (issues.length > 0 && !state.duplicatesChecked && state.generations < MAX_GENERATIONS) {
+    return new Command({
+      goto: "generate",
+      update: {
+        ...update,
+        duplicatesChecked: true,
+        feedback: { sql, issues },
+        steps: [...steps, step("The result repeats the same rows; rewriting the query...")],
+        repairHistory: [{ stage: "repeated_rows", attempt: attemptNumber, sql, duplicates: repeated.duplicates, constantColumns: repeated.constantColumns, rows: result.rows.length }],
+      } satisfies Update,
+    });
+  }
+  const cleaned = cleanRepeatedRows(sql, result.columns, result.rows);
+  if (cleaned.removed > 0 || cleaned.blanked.length > 0) {
+    // With copies gone the count is the rows kept: past the row limit, how
+    // many copies the rest held is unknown, and a total counting them misleads.
+    result = { ...result, rows: cleaned.rows, rowCount: cleaned.removed > 0 ? cleaned.rows.length : result.rowCount };
+    const notes = [
+      ...(cleaned.removed > 0 ? [`Removed ${cleaned.removed} repeated rows.`] : []),
+      ...(cleaned.blanked.length > 0 ? [`Showing ${cleaned.blanked.join(", ")} once instead of on every row.`] : []),
+    ];
+    Object.assign(update, { rows: result.rows, rowCount: result.rowCount, steps: [...steps, ...notes.map((note) => step(note))] });
+  }
 
   if (state.wantsVisualization && state.visualizationRequest) {
     const validation = validateVisualizationResult({

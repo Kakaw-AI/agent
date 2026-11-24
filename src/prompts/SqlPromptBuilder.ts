@@ -74,6 +74,7 @@ export abstract class BaseSqlPromptBuilder {
     return [
       ...this.buildDialectInstructions(),
       "Every aggregate metric must have a readable user-facing alias such as model_count, total_revenue, or average_rating.",
+      "Return each thing the question is about once. A table holding several values per row of another (URLs, tags, aliases, line items) multiplies rows when joined, so join at most one such list per query level. When the question needs several lists, aggregate each in its own subquery into one value per row (for example string_agg in PostgreSQL, group_concat in SQLite). Do not repeat an entity's columns on every row of one of its lists unless the question asks for them.",
       "When you filter on a text column, use a value exactly as it appears in the catalog examples (same spelling and case). If the example values do not include the one you need, match case-insensitively.",
       "A column shown with 'values:' lists every value it holds. When the question names one of them (a category, status or name), filter on that exact value; do not ask which one the user means and do not substitute a shorter or similar value.",
       "Earlier turns of the conversation include the SQL they ran. For a follow-up, start from that SQL and change only what the new question changes.",
