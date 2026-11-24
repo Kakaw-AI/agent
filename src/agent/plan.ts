@@ -7,6 +7,7 @@ import { invokeStructured, LlmReplyError } from "../llm/invoke.js";
 import { SqlDraftSchema } from "../llm/schemas.js";
 import { PostgresSqlPromptBuilder } from "../prompts/database/PostgresSqlPromptBuilder.js";
 import { SqliteSqlPromptBuilder } from "../prompts/database/SqliteSqlPromptBuilder.js";
+import { MongoSqlPromptBuilder } from "../prompts/database/MongoSqlPromptBuilder.js";
 import { VisualizationSqlUserPromptBuilder } from "../prompts/VisualizationSqlUserPromptBuilder.js";
 import { planWebQuery } from "./web.js";
 import { type NodeConfig, runtime, type SqlFeedback, type State, type Update } from "./state.js";
@@ -114,7 +115,7 @@ export async function generate(state: State, config: NodeConfig) {
   const steps = [
     step(feedback ? `Rewriting the query (attempt ${generations} of ${MAX_GENERATIONS})...` : "Generating read-only SQL..."),
   ];
-  const promptBuilder = request.database.provider === "sqlite" ? new SqliteSqlPromptBuilder() : new PostgresSqlPromptBuilder();
+  const promptBuilder = new { sqlite: SqliteSqlPromptBuilder, mongodb: MongoSqlPromptBuilder, postgresql: PostgresSqlPromptBuilder }[request.database.provider]();
 
   let result;
   try {

@@ -31,8 +31,10 @@
     "@opentelemetry/sdk-metrics": "^2.7.1",
     "@opentelemetry/sdk-node": "^0.218.0",
     "@opentelemetry/semantic-conventions": "^1.41.1",
+    "@synatic/noql": "^6.0.22",
     "better-sqlite3": "^12.8.0",
     "dotenv": "^17.4.0",
+    "mongodb": "^7.9.1",
     "pg": "^8.16.3",
     "zod": "^4.3.6"
   },

@@ -7,6 +7,7 @@ import { SQLException } from "../exceptions/SQLException.js";
 import { guardedSocket } from "../net/public-host.js";
 import type { AgentDatabaseRuntime } from "../types.js";
 import { materializeSqlite } from "./materialize.js";
+import { runMongoQuery } from "./mongo.js";
 import { assertReadOnlySql } from "./safety.js";
 import { sanitizeRow } from "./sanitize.js";
 import { QueryResult } from "./types.js";
@@ -241,6 +242,10 @@ export async function executeReadOnlyQuery(
 
   if (database.provider === "sqlite") {
     return runSqliteQuery(await materializeSqlite(database), statement);
+  }
+
+  if (database.provider === "mongodb") {
+    return runMongoQuery(database, statement);
   }
 
   return runPostgresQuery(database.connectionString!, statement);

@@ -9,16 +9,15 @@ import {
   countCatalogColumns,
   estimateCatalogTokens,
 } from "./catalog-render.js";
+import { introspectMongo } from "./mongo.js";
 import { introspectPostgres } from "./postgres.js";
 import { introspectSqlite } from "./sqlite.js";
 
 export async function syncDatabase(
   database: AgentDatabaseRuntime,
 ): Promise<AgentSyncResponse> {
-  const tables =
-    database.provider === "sqlite"
-      ? await introspectSqlite(database)
-      : await introspectPostgres(database);
+  const introspect = { sqlite: introspectSqlite, mongodb: introspectMongo, postgresql: introspectPostgres }[database.provider];
+  const tables = await introspect(database);
   const knowledgeDocuments = buildKnowledgeDocuments(database, tables);
   const schemaFingerprint = fingerprintCatalog(database.provider, tables);
 

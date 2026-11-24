@@ -29,7 +29,8 @@ const MAX_LISTED_VALUE_CHARS = 60;
  * large fact table's status column needs listing too.
  */
 const MAX_VALUE_SCAN_ROWS = 200_000;
-const TEXT_TYPE = /char|text|clob|enum|user-defined/i;
+// `string` is the MongoDB type name.
+const TEXT_TYPE = /char|text|clob|enum|user-defined|^string$/i;
 
 /** Whether introspection should look up a column's distinct values. */
 export function shouldListValues(

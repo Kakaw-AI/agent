@@ -85,7 +85,7 @@ export type DatabaseKnowledgeRuntime = {
 
 export type AgentDatabaseRuntime = {
   sourceId: string;
-  provider: "postgresql" | "sqlite";
+  provider: "postgresql" | "sqlite" | "mongodb";
   label: string;
   schemaFingerprint?: string;
   connectionString?: string;
