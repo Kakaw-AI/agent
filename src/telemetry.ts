@@ -114,7 +114,18 @@ const meter = metrics.getMeter(SERVICE_NAME);
 /** Per-layer wall-clock duration. */
 export const layerDurationHistogram = meter.createHistogram(
   "agent.layer.duration",
-  { description: "Agent pipeline layer duration", unit: "ms" },
+  {
+    description: "Agent pipeline layer duration",
+    unit: "ms",
+    // The SDK default stops at 10s, and one LLM call routinely takes 20s+,
+    // so every slow layer landed in +Inf and percentiles were meaningless.
+    advice: {
+      explicitBucketBoundaries: [
+        10, 50, 100, 250, 500, 1000, 2500, 5000, 7500, 10000, 15000, 20000,
+        30000, 45000, 60000, 90000, 120000,
+      ],
+    },
+  },
 );
 
 /** LLM token usage, split by direction ("input"/"output") and model. */
