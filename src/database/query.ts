@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { Pool } from "pg";
+import { Pool, types as pgTypes } from "pg";
 import { MAX_RESULT_ROWS, QUERY_TIMEOUT_MS } from "../config.js";
 import { SQLException } from "../exceptions/SQLException.js";
 import { guardedSocket } from "../net/public-host.js";
@@ -18,6 +18,19 @@ import { QueryResult } from "./types.js";
 const PG_POOL_MAX = 32;
 const pgPools = new Map<string, Pool>();
 
+// pg hands int8 (20) and numeric (1700) back as strings, which is what every
+// COUNT, SUM and AVG returns. Charts and totals only treat real numbers as
+// numbers, so convert, keeping the string when a double cannot hold the value.
+function toNumber(value: string): number | string {
+  const number = Number(value);
+  return Number.isFinite(number) && Math.abs(number) <= Number.MAX_SAFE_INTEGER ? number : value;
+}
+
+export const resultTypes = {
+  getTypeParser: ((oid: number, format?: "text" | "binary") =>
+    oid === 20 || oid === 1700 ? toNumber : pgTypes.getTypeParser(oid, format as "text")) as typeof pgTypes.getTypeParser,
+};
+
 function getPool(connectionString: string): Pool {
   const existing = pgPools.get(connectionString);
   if (existing) {
@@ -31,6 +44,7 @@ function getPool(connectionString: string): Pool {
     max: 5,
     connectionTimeoutMillis: 10_000,
     stream: guardedSocket,
+    types: resultTypes,
   });
   // An idle client that loses its connection (the user's database restarts)
   // emits here. With no listener that is an uncaught error and the process dies.

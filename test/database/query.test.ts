@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MAX_RESULT_ROWS } from "../../src/config.js";
-import { runSqliteQuery } from "../../src/database/query.js";
+import { resultTypes, runSqliteQuery } from "../../src/database/query.js";
 import { assertReadOnlySql } from "../../src/database/safety.js";
 
 describe("runSqliteQuery", () => {
@@ -80,5 +80,16 @@ describe("assertReadOnlySql", () => {
   it("allows plain reads", () => {
     expect(() => assertReadOnlySql("SELECT * FROM users;")).not.toThrow();
     expect(() => assertReadOnlySql("WITH t AS (SELECT 1) SELECT * FROM t")).not.toThrow();
+  });
+});
+
+describe("resultTypes", () => {
+  it("returns PostgreSQL int8 and numeric values as numbers so they can be charted", () => {
+    expect(resultTypes.getTypeParser(20)("5905")).toBe(5905);
+    expect(resultTypes.getTypeParser(1700)("19169.00")).toBe(19169);
+    // too big for a double: keep the exact text
+    expect(resultTypes.getTypeParser(20)("9223372036854775807")).toBe("9223372036854775807");
+    expect(resultTypes.getTypeParser(1700)("NaN")).toBe("NaN");
+    expect(resultTypes.getTypeParser(25)("12")).toBe("12");
   });
 });
