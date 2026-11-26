@@ -84,15 +84,21 @@ export function planChartSpecDeterministically(input: DeterministicChartSpecInpu
   );
   const dimensions = [...inferTextColumns(columns, rows), ...timeNumbers];
 
+  // "top 5 products by units sold": a "by" that names a number, next to text that
+  // could label the rows, is what they are ranked by, not the x axis.
+  const named = findColumnByName(columns, visualizationRequest?.categoryFields[0] ?? null);
+  const rankedBy = named && numericColumns.includes(named) && dimensions.length > 0 ? named : null;
+
   const metricField =
     findColumnByName(columns, visualizationRequest?.metricField ?? null) ??
+    rankedBy ??
     numericColumns.find((column) => /(total|count|sum|amount|revenue|sales|score|value)/i.test(column)) ??
     numericColumns[0] ??
     null;
   const otherMetrics = numericColumns.filter((column) => column !== metricField);
 
   // A time column is the x axis when there is one; the other dimension is the series.
-  const requestedCategory = findColumnByName(columns, visualizationRequest?.categoryFields[0] ?? null);
+  const requestedCategory = rankedBy ? null : named;
   const categoryField =
     requestedCategory ?? dimensions.find((column) => isTemporalField(column, rows)) ?? dimensions[0] ?? null;
   // A second text column is a series only when categories repeat across rows;

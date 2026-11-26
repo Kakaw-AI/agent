@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { planChartSpecDeterministically, requestedChartKind } from "../../src/graph/chart-spec.js";
+import { buildVisualizationRequestFromQuestion } from "../../src/llm/intent/visualization-request.js";
 
 // The production rows behind "Show that as a bar chart" (2026-11-23).
 const monthlyRevenue = {
@@ -110,5 +111,36 @@ describe("chart shape follows the table", () => {
   it("treats a per-row attribute as a label, not a series", () => {
     const rows = ["Ann", "Bob", "Cy"].map((name, i) => ({ name, city: `City ${i}`, spend: 10 * (i + 1) }));
     expect(plan(["name", "city", "spend"], rows)?.seriesField ?? null).toBeNull();
+  });
+});
+
+// "top N things by <measure>": the words after "by" rank the rows, they are not
+// the x axis. Production drew units on both axes and the names as colours (2026-11-26).
+describe("a ranking asked as 'by <measure>'", () => {
+  const rows = [
+    { units_sold: 330, product_name: "Marble Bookends" },
+    { units_sold: 316, product_name: "Woven Wall Hanging" },
+    { units_sold: 292, product_name: "Velvet Throw Pillow" },
+    { units_sold: 283, product_name: "Ceramic Table Lamp" },
+    { units_sold: 283, product_name: "Macrame Plant Hanger" },
+  ];
+  const plan = (question: string, columns: string[], data: Array<Record<string, unknown>>) =>
+    planChartSpecDeterministically({ question, columns, rows: data, visualizationRequest: buildVisualizationRequestFromQuestion(question) });
+
+  it("puts the names on the axis and the measure on the bars", () => {
+    const spec = plan("Chart the top 5 products by units sold", ["units_sold", "product_name"], rows);
+    expect(spec).toMatchObject({ xField: "product_name", yField: "units_sold" });
+    expect(spec?.seriesField).toBeUndefined();
+  });
+
+  it("ranks by the named measure even when another column looks more like one", () => {
+    const data = rows.map((row, i) => ({ ...row, total_revenue: 1000 + i }));
+    const spec = plan("Chart the top 5 products by units sold", ["product_name", "units_sold", "total_revenue"], data);
+    expect(spec).toMatchObject({ xField: "product_name", yField: "units_sold" });
+  });
+
+  it("still uses a number as the axis when there is no text column", () => {
+    const data = [{ rating: 4, order_count: 10 }, { rating: 5, order_count: 12 }];
+    expect(plan("Chart orders by rating", ["rating", "order_count"], data)).toMatchObject({ xField: "rating", yField: "order_count" });
   });
 });
