@@ -3,9 +3,9 @@
   <img alt="agent — kakaw-ai by gitnasr" src=".github/banner-light.svg" width="100%">
 </picture>
 
-The agent behind [Kakaw AI](https://kakaw.gitnasr.com). It takes a question in plain English, writes SQL for the connected database, runs it, and returns the answer as a table or a chart.
+The agent behind [Kakaw AI](https://kakaw.nasr.work). It takes a question in plain English, writes a read-only query for the connected database (SQL for PostgreSQL and SQLite, an aggregation pipeline for MongoDB), runs it, and returns the answer as a table or a chart.
 
-[Backend](https://github.com/Kakaw-AI/backend) · [Frontend](https://github.com/Kakaw-AI/frontend) · [Monitoring](https://github.com/Kakaw-AI/monitoring) · [Site](https://kakaw.gitnasr.com)
+[Backend](https://github.com/Kakaw-AI/backend) · [Frontend](https://github.com/Kakaw-AI/frontend) · [Monitoring](https://github.com/Kakaw-AI/monitoring) · [Site](https://kakaw.nasr.work)
 
 ## How it works
 
@@ -14,7 +14,7 @@ A LangGraph 1.x state graph in TypeScript, calling models through LangChain (Ant
 ```
 route ─┬─ small talk ───────────────────────────────────────► finalize
        ├─ "chart that" ─────────────────────────────────────► accept
-       └─ data ─► cache ─┬─ reuse SQL ─► execute
+       └─ data ─► cache ─┬─ reuse query ─► execute
                          └─ generate ◄──┐
                                │        │ repair, with what went wrong
                                ▼        │
@@ -25,12 +25,12 @@ route ─┬─ small talk ─────────────────�
           accept ─► writeAnswer ∥ planChart ∥ suggestFollowUps ─► finalize
 ```
 
-- **route** rewrites a follow-up ("what about 2025?") into a standalone question using the earlier turns and their SQL. The plan cache and query memory are keyed on that question, not the raw text.
-- **generate** writes the SQL, or asks a clarifying question when the request has several readings that give different answers. The options come back as clickable suggestions.
+- **route** rewrites a follow-up ("what about 2025?") into a standalone question using the earlier turns and their queries. The plan cache and query memory are keyed on that question, not the raw text.
+- **generate** writes the query (SQL, or a MongoDB pipeline), or asks a clarifying question when the request has several readings that give different answers. The options come back as clickable suggestions.
 - **execute** runs the query. A misspelled identifier is fixed without a model call; other errors go back to **generate** with the error.
 - **checkValues** runs when nothing comes back (or a COUNT of 0). It looks up the values stored in the filtered columns: a difference in case only is fixed in place, anything else goes back to **generate** with the real values.
 - **verify** reviews the result against the question once, and can send it back for one rewrite (`VERIFY_RESULTS=false` turns it off).
-- **accept** sends the SQL and table to the client straight away; the answer, chart and suggestions are then produced in parallel.
+- **accept** sends the query and table to the client straight away; the answer, chart and suggestions are then produced in parallel.
 
 ### Accuracy
 
@@ -56,14 +56,15 @@ The code in `src/`:
 | `graph` | Field resolution, chart specs, visualization checks |
 | `llm` | Model calls, plan cache, intent helpers, schemas |
 | `prompts` | Prompt text |
-| `database` | Schema index, knowledge, query execution, row inference |
+| `database` | Schema index, knowledge, query execution (PostgreSQL, SQLite, MongoDB), row inference |
 | `server.ts` | HTTP entry point (port 8000 in the image) |
 | `telemetry.ts` | OpenTelemetry setup |
 
-SQL is checked before it runs (`src/database/safety.ts`): one statement only, starting with `SELECT`, `WITH`, `EXPLAIN` or `PRAGMA`, and anything that writes or changes the schema is rejected. That check is a first filter. The boundary is in `src/database/query.ts`:
+For PostgreSQL and SQLite, SQL is checked before it runs (`src/database/safety.ts`): one statement only, starting with `SELECT`, `WITH`, `EXPLAIN` or `PRAGMA`, and anything that writes or changes the schema is rejected. That check is a first filter. The boundary is in `src/database/query.ts`:
 
 - Postgres queries run inside a read-only transaction with a statement timeout, through a cursor, so at most 200 rows leave the database.
 - SQLite files are opened read-only in a separate process that is killed when a query passes the timeout.
+- MongoDB has no read-only transaction. `src/database/mongo.ts` accepts only an aggregation as `{collection, pipeline}` and refuses stages that write or run JavaScript.
 - In production the agent will not connect to private or internal addresses, for the user's database or a custom LLM endpoint (`src/net/public-host.ts`).
 
 ## Run it

@@ -123,7 +123,7 @@ export async function generate(state: State, config: NodeConfig) {
   const feedback = state.feedback;
   const generations = state.generations + 1;
   const steps = [
-    step(feedback ? `Rewriting the query (attempt ${generations} of ${MAX_GENERATIONS})...` : "Generating read-only SQL..."),
+    step(feedback ? `Rewriting the query (attempt ${generations} of ${MAX_GENERATIONS})...` : "Writing a read-only query..."),
   ];
   const promptBuilder = new { sqlite: SqliteSqlPromptBuilder, mongodb: MongoSqlPromptBuilder, postgresql: PostgresSqlPromptBuilder }[request.database.provider]();
 
@@ -160,7 +160,7 @@ export async function generate(state: State, config: NodeConfig) {
       schema: SqlDraftSchema,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "SQL generation failed.";
+    const message = error instanceof Error ? error.message : "Writing the query failed.";
     // A rewrite that times out or fails still leaves the last query's result,
     // which is a valid (if imperfect) answer, as when the draft budget runs out.
     const lastRan = state.toolCalls.some((call) => call.tool === "sql_attempt" && call.sql === state.sql);

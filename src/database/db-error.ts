@@ -59,10 +59,10 @@ function readString(source: Record<string, unknown>, key: string): string | null
 export function normalizeDbError(error: unknown): NormalizedDbError {
   const message =
     error instanceof Error
-      ? error.message || "SQL execution failed."
+      ? error.message || "Query execution failed."
       : typeof error === "string" && error
         ? error
-        : "SQL execution failed.";
+        : "Query execution failed.";
 
   // Duck-typed rather than `instanceof DatabaseError`: pg re-exports that class
   // from pg-protocol, so identity breaks whenever the dependency is duplicated

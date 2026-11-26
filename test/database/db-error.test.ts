@@ -111,7 +111,7 @@ describe("normalizeDbError", () => {
     expect(error.kind).toBe("other");
     expect(error.missingIdentifier).toBeNull();
 
-    expect(normalizeDbError(undefined).message).toBe("SQL execution failed.");
+    expect(normalizeDbError(undefined).message).toBe("Query execution failed.");
   });
 
   it("strips a table qualifier from an identifier", () => {

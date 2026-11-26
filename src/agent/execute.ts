@@ -249,7 +249,7 @@ export function afterEmptyResult(state: State): "verify" | "accept" {
 export async function execute(state: State, config: NodeConfig) {
   const { request, step } = runtime(config, "execute");
   const sql = state.sql;
-  const steps = [step(state.generations > 1 || state.freeRepairs > 0 ? "Running the corrected query..." : "Executing SQL against the selected database...")];
+  const steps = [step(state.generations > 1 || state.freeRepairs > 0 ? "Running the corrected query..." : "Running the query against the selected database...")];
   const attemptNumber = state.generations + state.freeRepairs;
 
   // Reads the SELECT list, so it has nothing to read in a MongoDB pipeline;
@@ -267,7 +267,7 @@ export async function execute(state: State, config: NodeConfig) {
           visualizationValidationErrors: plausibility.errors,
           narrowedVisualizationReason: "The SQL draft was missing requested visualization fields.",
         },
-        "I couldn't produce SQL for this visualization that preserved all requested fields. Please narrow the request or rephrase it.",
+        "I couldn't write a query for this visualization that preserved all requested fields. Please narrow the request or rephrase it.",
       );
     }
   }
@@ -319,7 +319,7 @@ export async function execute(state: State, config: NodeConfig) {
       state,
       { sql, issues: [dbError.message], dbErrorBlock: describeDbErrorForPrompt(dbError, schemaIndex, sql) },
       { steps, repairHistory: [failure] },
-      `I wasn't able to generate valid SQL for this question. The last error was: ${dbError.message}. Please try rephrasing your question.`,
+      `I wasn't able to write a working query for this question. The last error was: ${dbError.message}. Please try rephrasing your question.`,
     );
   }
 

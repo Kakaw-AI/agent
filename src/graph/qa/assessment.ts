@@ -90,10 +90,10 @@ export function buildVisualizationSqlExhaustedOutcome(
       ? unresolved
           .map(
             (entry) =>
-              `I couldn't find a column named "${entry.field}". Did you mean ${entry.candidates.join(" or ")}?`,
+              `I couldn't find a column or field named "${entry.field}". Did you mean ${entry.candidates.join(" or ")}?`,
           )
           .join(" ")
-      : "I couldn't produce SQL for this visualization that preserved all requested fields. Please narrow the request or rephrase it.";
+      : "I couldn't write a query for this visualization that preserved all requested fields. Please narrow the request or rephrase it.";
 
   return {
     answer,
@@ -102,7 +102,7 @@ export function buildVisualizationSqlExhaustedOutcome(
     narrowedVisualizationReason: "The generated SQL kept dropping requested visualization fields.",
     steps: [
       {
-        text: "Failed to generate SQL that preserved the requested visualization fields.",
+        text: "Failed to write a query that preserved the requested visualization fields.",
         at: new Date().toISOString(),
       },
     ],
