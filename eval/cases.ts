@@ -18,7 +18,14 @@ export type EvalCase = {
     | "greeting"
     | "follow_up"
     | "chart_follow_up"
-    | "ambiguous";
+    | "ambiguous"
+    // messy fixture (eval/messy/cases.ts)
+    | "coded_value"
+    | "lookup"
+    | "int_date"
+    | "units"
+    | "hidden_join"
+    | "hierarchy";
   question: string;
   /** Correct SQL for `question`. Absent for greetings and ambiguous cases. */
   sql?: string;

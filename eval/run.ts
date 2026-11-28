@@ -3,6 +3,11 @@
  * scores each result set against the correct SQL.
  *
  *   npx tsx eval/run.ts --label new [--only b1,f2] [--concurrency 2] [--fresh true]
+ *   npx tsx eval/run.ts --fixture messy --label messy-base
+ *
+ * `--fixture shop` (default) is a clean five-table SQLite file. `--fixture
+ * messy` is the legacy-style PostgreSQL ERP from eval/messy/seed.ts, read
+ * through the URL in eval/.env.messy, for measuring what schema knowledge adds.
  *
  * Results accumulate in eval/results/<label>.json, written after every case,
  * so runs can be split with --only and an interrupted run loses nothing.
@@ -21,7 +26,9 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import pg from "pg";
 import { CASES, type EvalCase } from "./cases.js";
+import { MESSY_CASES } from "./messy/cases.js";
 import { resultsMatch } from "./score.js";
 import { seedShopDatabase } from "./seed.js";
 
@@ -39,6 +46,9 @@ const label = args.get("label") || "run";
 const only = args.get("only")?.split(",").filter(Boolean);
 const concurrency = Number(args.get("concurrency") || 2);
 const fresh = args.get("fresh") === "true";
+const fixture = args.get("fixture") || "shop";
+if (fixture !== "shop" && fixture !== "messy") throw new Error(`Unknown fixture ${fixture}`);
+const ALL_CASES = fixture === "messy" ? MESSY_CASES : CASES;
 
 const BASE_URL = process.env.EVAL_BASE_URL || "http://127.0.0.1:1234/v1";
 const MODEL = process.env.EVAL_MODEL || "qwen/qwen3.5-9b";
@@ -167,21 +177,42 @@ const streamAgent = await loadEntry();
 const { syncDatabase } = await import("../src/database/knowledge.js");
 
 // ── fixture ────────────────────────────────────────────────────────────────
-const seedPath = join(here, ".data", "shop.sqlite");
-seedShopDatabase(seedPath);
+type GoldResult = { columns: string[]; rows: Array<Record<string, unknown>> };
+let database: import("../src/types.js").AgentDatabaseRuntime;
+let gold: (sql: string) => Promise<GoldResult>;
 
-const database = {
-  sourceId: "eval-shop",
-  provider: "sqlite" as const,
-  label: "Shop (eval)",
-  sqliteObjectKey: "eval/shop.sqlite",
-  sqliteOriginalFilename: "shop.sqlite",
-  schemaFingerprint: undefined as string | undefined,
-};
-// Where the agent looks for a downloaded SQLite file (src/database/materialize.ts).
-const cached = join(tmpdir(), "kakaw-sqlite", `${Buffer.from(database.sqliteObjectKey).toString("hex")}.sqlite`);
-mkdirSync(dirname(cached), { recursive: true });
-copyFileSync(seedPath, cached);
+if (fixture === "messy") {
+  const envPath = join(here, ".env.messy");
+  if (!existsSync(envPath)) throw new Error("Run eval/messy/seed.ts first; it writes eval/.env.messy.");
+  const url = readFileSync(envPath, "utf8").match(/^MESSY_READER_URL=(.+)$/m)?.[1]?.trim();
+  if (!url) throw new Error("MESSY_READER_URL is missing from eval/.env.messy.");
+  database = { sourceId: "eval-messy", provider: "postgresql", label: "Messy ERP (eval)", connectionString: url };
+  const goldClient = new pg.Client({ connectionString: url });
+  await goldClient.connect();
+  gold = async (sql) => {
+    const result = await goldClient.query(sql);
+    return { columns: result.fields.map((field) => field.name), rows: result.rows };
+  };
+} else {
+  const seedPath = join(here, ".data", "shop.sqlite");
+  seedShopDatabase(seedPath);
+  database = {
+    sourceId: "eval-shop",
+    provider: "sqlite",
+    label: "Shop (eval)",
+    sqliteObjectKey: "eval/shop.sqlite",
+    sqliteOriginalFilename: "shop.sqlite",
+  };
+  // Where the agent looks for a downloaded SQLite file (src/database/materialize.ts).
+  const cached = join(tmpdir(), "kakaw-sqlite", `${Buffer.from(database.sqliteObjectKey!).toString("hex")}.sqlite`);
+  mkdirSync(dirname(cached), { recursive: true });
+  copyFileSync(seedPath, cached);
+  const goldDb = new Database(seedPath, { readonly: true });
+  gold = async (sql) => {
+    const statement = goldDb.prepare(sql);
+    return { columns: statement.columns().map((column) => column.name), rows: statement.all() as Array<Record<string, unknown>> };
+  };
+}
 
 const sync = await syncDatabase(database);
 database.schemaFingerprint = sync.schemaFingerprint;
@@ -193,15 +224,11 @@ const knowledge = {
   tables: sync.catalog.tables,
 };
 
-const goldDb = new Database(seedPath, { readonly: true });
-function gold(sql: string) {
-  const statement = goldDb.prepare(sql);
-  return { columns: statement.columns().map((column) => column.name), rows: statement.all() as Array<Record<string, unknown>> };
-}
-
-function historyFor(testCase: EvalCase): AgentHistoryMessage[] {
-  return (testCase.history ?? []).flatMap((turn): AgentHistoryMessage[] => {
-    const result = gold(turn.sql);
+async function historyFor(testCase: EvalCase): Promise<AgentHistoryMessage[]> {
+  const turns = await Promise.all(
+    (testCase.history ?? []).map(async (turn) => ({ turn, result: await gold(turn.sql) })),
+  );
+  return turns.flatMap(({ turn, result }): AgentHistoryMessage[] => {
     return [
       { role: "user", content: turn.question },
       // What the backend stores with an assistant message.
@@ -236,7 +263,7 @@ async function runCase(testCase: EvalCase): Promise<CaseResult> {
     userId: "eval",
     messageId: `msg-${testCase.id}`,
     message: testCase.question,
-    history: historyFor(testCase),
+    history: await historyFor(testCase),
     database,
     knowledge,
     llm: { connectionId: "eval", provider: "lm-studio", model: MODEL, apiKey: API_KEY, baseUrl: BASE_URL },
@@ -275,7 +302,7 @@ async function runCase(testCase: EvalCase): Promise<CaseResult> {
   } else if (!result) {
     reason = failed ? `failed: ${failed.error}` : clarified ? "asked instead of answering" : "no result";
   } else {
-    pass = resultsMatch(gold(testCase.sql!), { columns: result.columns, rows: result.rows });
+    pass = resultsMatch(await gold(testCase.sql!), { columns: result.columns, rows: result.rows });
     reason = pass ? "ok" : "wrong result";
     if (pass && testCase.category === "chart_follow_up" && !last("chart_generated")) {
       pass = false;
@@ -316,7 +343,7 @@ if (!fresh && existsSync(resultsPath)) {
 }
 
 function summarize() {
-  const all = CASES.map((testCase) => results.get(testCase.id)).filter((result): result is CaseResult => !!result);
+  const all = ALL_CASES.map((testCase) => results.get(testCase.id)).filter((result): result is CaseResult => !!result);
   const sum = (pick: (result: CaseResult) => number) => all.reduce((total, result) => total + pick(result), 0);
   const average = (pick: (result: CaseResult) => number) => (all.length ? Math.round((sum(pick) / all.length) * 10) / 10 : 0);
   const byCategory: Record<string, string> = {};
@@ -327,6 +354,7 @@ function summarize() {
   return {
     summary: {
       label,
+      fixture,
       model: MODEL,
       cannedFinish: !REAL_FINISH,
       updatedAt: new Date().toISOString(),
@@ -347,7 +375,7 @@ function save() {
 }
 
 // ── run ────────────────────────────────────────────────────────────────────
-const selected = only ? CASES.filter((testCase) => only.includes(testCase.id)) : CASES;
+const selected = only ? ALL_CASES.filter((testCase) => only.includes(testCase.id)) : ALL_CASES;
 const units: EvalCase[][] = [];
 const groups = new Map<string, EvalCase[]>();
 for (const testCase of selected) {
