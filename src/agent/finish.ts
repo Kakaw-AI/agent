@@ -100,7 +100,6 @@ export async function answer(state: State, config: NodeConfig): Promise<Update> 
       tokenUsage: mergeTokenUsage(researchUsage, tokenUsage),
       steps,
       toolCalls,
-      webSources: sources,
     };
   }
 

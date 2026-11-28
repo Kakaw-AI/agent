@@ -310,7 +310,6 @@ export async function execute(state: State, config: NodeConfig) {
           freeRepairs: state.freeRepairs + 1,
           steps: [...steps, step(`Retrying with ${fixed.to} after the database reported an unknown ${noun} "${fixed.from}".`)],
           repairHistory: [failure, { stage: "sql_identifier_autocorrect", attempt: attemptNumber, from: fixed.from, to: fixed.to, sql: fixed.sql }],
-          schemaCorrections: [{ from: fixed.from, to: fixed.to, stage: "sql_execution" }],
         } satisfies Update,
       });
     }

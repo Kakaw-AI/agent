@@ -102,7 +102,6 @@ export async function cache(state: State, config: NodeConfig) {
       update: {
         cacheKey,
         sqlFromCache: true,
-        fromMemory: true,
         sql: exactPlan.sql,
         steps: [step("Reusing a query this database has answered before...")],
         toolCalls: [{ tool: "query_memory", hit: "exact", memoryId: exactPlan.memoryId }],

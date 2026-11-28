@@ -7,7 +7,6 @@ import {
   collectSampleValues,
   completeValueList,
   extractPostgresIndexColumns,
-  normalizeName,
   sanitizeRow,
   shouldListValues,
 } from "./sanitize.js";
@@ -152,7 +151,6 @@ export async function introspectPostgres(
           : null;
         catalogColumns.push({
           name: column.column_name,
-          normalizedName: normalizeName(column.column_name),
           dataType: column.data_type,
           isNullable: column.is_nullable === "YES",
           isPrimaryKey,
@@ -165,7 +163,6 @@ export async function introspectPostgres(
         schemaName,
         name: tableName,
         rowCount,
-        sampleRows,
         columns: catalogColumns,
         indexes: indexes.rows.map((index) => ({
           name: index.indexname,

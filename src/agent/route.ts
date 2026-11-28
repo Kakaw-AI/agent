@@ -145,10 +145,7 @@ export async function route(_state: State, config: NodeConfig) {
         ]
       : toolCalls,
     ...(resolution
-      ? {
-          fieldResolutions: resolution.entries,
-          schemaCorrections: resolution.corrections.map((correction) => ({ ...correction, stage: "intent" })),
-        }
+      ? { fieldResolutions: resolution.entries }
       : {}),
   };
 

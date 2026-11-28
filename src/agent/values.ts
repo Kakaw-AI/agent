@@ -314,7 +314,6 @@ export async function checkValues(state: State, config: NodeConfig) {
         sql,
         valuesChecked: true,
         repairHistory,
-        schemaCorrections: corrections,
         steps: [...steps, step(`Retrying with the stored ${corrections.length === 1 ? "value" : "values"} ${corrections.map((c) => quoteLiteral(c.to)).join(", ")}.`)],
       } satisfies Update,
     });

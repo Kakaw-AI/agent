@@ -4,6 +4,7 @@ import {
   RESULT_CACHE_TTL_MS,
 } from "../config.js";
 import { computeSchemaIdentity } from "../database/schema-index.js";
+import { normalizeQuestion } from "../utils/text.js";
 import type {
   AgentRunRequest,
   VisualizationChartSpec,
@@ -42,10 +43,6 @@ function schemaIdentity(request: AgentRunRequest): string {
     request.knowledge,
     request.database.schemaFingerprint,
   );
-}
-
-function normalizeQuestion(message: string): string {
-  return message.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 /**

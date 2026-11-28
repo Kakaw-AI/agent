@@ -79,7 +79,6 @@ beforeAll(async () => {
       schemaFingerprint: sync.schemaFingerprint,
       summary: "",
       tables: sync.catalog.tables,
-      knowledgeDocuments: sync.catalog.knowledgeDocuments,
     },
     llm: { connectionId: "llm", provider: "openai", model: "test", apiKey: "k" },
   };

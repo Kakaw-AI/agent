@@ -1,4 +1,3 @@
-import type { WebSource } from "../net/web-search.js";
 import { ReducedValue, StateSchema, type LangGraphRunnableConfig } from "@langchain/langgraph";
 import { z } from "zod";
 import type { FieldResolutionEntry } from "../graph/types.js";
@@ -57,8 +56,6 @@ export const AgentState = new StateSchema({
   cacheHit: value<boolean>(() => false),
   /** SQL came from the plan cache or query memory; generation is skipped. */
   sqlFromCache: value<boolean>(() => false),
-  /** SQL came from query memory, where it was already verified once. */
-  fromMemory: value<boolean>(() => false),
 
   sql: value<string>(() => ""),
   feedback: value<SqlFeedback | null>(() => null),
@@ -79,7 +76,6 @@ export const AgentState = new StateSchema({
 
   /** Outside facts to look up; set by the SQL draft, searched while answering. */
   webQuery: value<string>(() => ""),
-  webSources: value<WebSource[]>(() => []),
 
   answer: value<string>(() => ""),
   clarification: value<{ question: string; options: string[] } | null>(() => null),
@@ -103,7 +99,6 @@ export const AgentState = new StateSchema({
   steps: appended<{ text: string; at: string }>(),
   toolCalls: appended<Record<string, unknown>>(),
   repairHistory: appended<Record<string, unknown>>(),
-  schemaCorrections: appended<{ from: string; to: string; stage: string }>(),
 });
 
 export type State = typeof AgentState.State;

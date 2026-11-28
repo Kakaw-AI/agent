@@ -165,9 +165,6 @@ class SchemaIndexImpl implements SchemaIndex {
       };
 
       for (const catalogColumn of catalogTable.columns) {
-        // normalizedName arrives pre-computed on the wire but may have been
-        // produced by an older build, so it is recomputed here rather than
-        // trusted.
         const normalized = normalizeIdentifier(catalogColumn.name);
         const column: IndexedColumn = {
           name: catalogColumn.name,

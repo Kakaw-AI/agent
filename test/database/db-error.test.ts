@@ -31,7 +31,6 @@ const KNOWLEDGE: DatabaseKnowledgeRuntime = {
       columns: [
         {
           name: "customer_id",
-          normalizedName: "customer_id",
           dataType: "integer",
           isNullable: false,
           isPrimaryKey: false,
@@ -39,7 +38,6 @@ const KNOWLEDGE: DatabaseKnowledgeRuntime = {
         },
         {
           name: "total_amount",
-          normalizedName: "total_amount",
           dataType: "numeric",
           isNullable: true,
           isPrimaryKey: false,
@@ -50,7 +48,6 @@ const KNOWLEDGE: DatabaseKnowledgeRuntime = {
       foreignKeys: [],
     },
   ],
-  knowledgeDocuments: [],
 };
 
 const INDEX = buildSchemaIndex(KNOWLEDGE);

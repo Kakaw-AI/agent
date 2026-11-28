@@ -31,11 +31,9 @@ export function dedupeFieldNames(fields: Array<string | null | undefined>) {
 }
 
 /**
- * Flattens LangChain message content, preserving whitespace exactly.
- *
- * Streaming callers must use this rather than `flattenContent`: trimming each
- * chunk deletes the spaces that separate words, so "You have " + "three " turns
- * into "You havethree".
+ * Flattens LangChain message content, preserving whitespace exactly. Never trim
+ * a streamed chunk: that deletes the spaces between words, so "You have " +
+ * "three " turns into "You havethree".
  */
 export function flattenContentRaw(content: unknown) {
   if (typeof content === "string") {
@@ -53,8 +51,4 @@ export function flattenContentRaw(content: unknown) {
   }
 
   return "";
-}
-
-export function flattenContent(content: unknown) {
-  return flattenContentRaw(content).trim();
 }

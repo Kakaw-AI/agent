@@ -1,17 +1,5 @@
 import type { DatabaseKnowledgeRuntime, VisualizationCapabilityDecision, VisualizationRequest } from "../types.js";
 
-export type IntentKind =
-  | "small_talk"
-  | "data_answer"
-  | "explicit_visualization"
-  | "visualization_followup";
-
-export type IntentDecision = {
-  kind: IntentKind;
-  wantsVisualization: boolean;
-  visualizationRequest: VisualizationRequest | null;
-};
-
 export type VisualizationValidationInput = {
   request: VisualizationRequest;
   capabilityDecision?: VisualizationCapabilityDecision | null;

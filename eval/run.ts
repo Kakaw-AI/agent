@@ -190,8 +190,7 @@ database.schemaFingerprint = sync.schemaFingerprint;
 const knowledge = {
   schemaFingerprint: sync.schemaFingerprint,
   summary: `${sync.catalog.tables.length} tables`,
-  tables: sync.catalog.tables.map(({ sampleRows: _sampleRows, ...table }) => table),
-  knowledgeDocuments: sync.catalog.knowledgeDocuments,
+  tables: sync.catalog.tables,
 };
 
 const goldDb = new Database(seedPath, { readonly: true });

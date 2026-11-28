@@ -27,13 +27,6 @@ export type AgentRetrievalContext = {
 
 export type DatabaseCatalogColumn = {
   name: string;
-  /**
-   * Wire-compatibility only. This is computed at sync time and stored by the
-   * backend, so a value arriving on a request may have been produced by an
-   * older build. Anything that needs a normalized form recomputes it via
-   * `normalizeIdentifier` rather than trusting this field.
-   */
-  normalizedName: string;
   dataType: string;
   isNullable: boolean;
   isPrimaryKey: boolean;
@@ -63,24 +56,18 @@ export type DatabaseCatalogTable = {
   name: string;
   rowCount?: number | null;
   columns: DatabaseCatalogColumn[];
-  indexes: DatabaseCatalogIndex[];
+  /**
+   * Set by introspection and folded into the schema fingerprint. The backend
+   * does not store indexes, so tables arriving on a run request have none.
+   */
+  indexes?: DatabaseCatalogIndex[];
   foreignKeys: DatabaseCatalogForeignKey[];
-  sampleRows?: Array<Record<string, unknown>>;
-};
-
-export type DatabaseKnowledgeDocument = {
-  scope: string;
-  referenceType: string;
-  referenceKey: string;
-  content: string;
-  metadata?: Record<string, unknown>;
 };
 
 export type DatabaseKnowledgeRuntime = {
   schemaFingerprint: string | null;
   summary: string;
   tables: DatabaseCatalogTable[];
-  knowledgeDocuments: DatabaseKnowledgeDocument[];
 };
 
 export type AgentDatabaseRuntime = {
@@ -140,13 +127,11 @@ export type AgentSyncRequest = {
 export type AgentSyncResponse = {
   sourceId: string;
   status: "READY" | "FAILED";
-  memoryCount: number;
   schemaFingerprint: string;
   syncedAt: string;
   syncMetadata: Record<string, unknown>;
   catalog: {
     tables: DatabaseCatalogTable[];
-    knowledgeDocuments: DatabaseKnowledgeDocument[];
   };
   error?: string;
 };

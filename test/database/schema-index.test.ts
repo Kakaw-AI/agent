@@ -16,7 +16,6 @@ function column(
 ): DatabaseCatalogColumn {
   return {
     name,
-    normalizedName: name.toLowerCase(),
     dataType: "text",
     isNullable: true,
     isPrimaryKey: false,
@@ -49,7 +48,6 @@ function knowledge(
     schemaFingerprint,
     summary: "test catalog",
     tables,
-    knowledgeDocuments: [],
   };
 }
 
@@ -80,12 +78,9 @@ describe("buildSchemaIndex", () => {
     expect(index.getTable("public.orders")?.name).toBe("orders");
   });
 
-  it("recomputes normalization rather than trusting the wire field", () => {
-    const stale = knowledge([
-      table("orders", [column("Order Date", { normalizedName: "wrong_value" })]),
-    ]);
-    const staleIndex = buildSchemaIndex(stale);
-    expect(staleIndex.getColumn("order_date")?.name).toBe("Order Date");
+  it("normalizes column names itself", () => {
+    const index = buildSchemaIndex(knowledge([table("orders", [column("Order Date")])]));
+    expect(index.getColumn("order_date")?.name).toBe("Order Date");
   });
 });
 

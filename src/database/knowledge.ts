@@ -3,7 +3,6 @@ import type {
   AgentDatabaseRuntime,
   AgentSyncResponse,
   DatabaseCatalogTable,
-  DatabaseKnowledgeDocument,
 } from "../types.js";
 import {
   countCatalogColumns,
@@ -18,19 +17,16 @@ export async function syncDatabase(
 ): Promise<AgentSyncResponse> {
   const introspect = { sqlite: introspectSqlite, mongodb: introspectMongo, postgresql: introspectPostgres }[database.provider];
   const tables = await introspect(database);
-  const knowledgeDocuments = buildKnowledgeDocuments(database, tables);
   const schemaFingerprint = fingerprintCatalog(database.provider, tables);
 
   return {
     sourceId: database.sourceId,
     status: "READY",
-    memoryCount: knowledgeDocuments.length,
     schemaFingerprint,
     syncedAt: new Date().toISOString(),
     syncMetadata: {
       provider: database.provider,
       tableCount: tables.length,
-      documentCount: knowledgeDocuments.length,
       // Recorded so the catalog size distribution across real sources is
       // queryable. The subsetting threshold is a decision about this number,
       // and until it is measured there is nothing to decide against.
@@ -39,7 +35,6 @@ export async function syncDatabase(
     },
     catalog: {
       tables,
-      knowledgeDocuments,
     },
   };
 }
@@ -47,10 +42,10 @@ export async function syncDatabase(
 /**
  * Hashes only the facts that describe the database itself.
  *
- * Hashing the whole table objects would fold in fields we derive locally —
- * `normalizedName` above all — so changing how we normalize would invalidate
- * every stored fingerprint and force a full re-sync of every source. The
- * fingerprint should change when the customer's schema changes, and not before.
+ * Hashing the whole table objects would fold in data that changes on every
+ * sync (row counts, sample values), so every sync would look like a schema
+ * change and retire query memory. The fingerprint should change when the
+ * customer's schema changes, and not before.
  */
 function fingerprintCatalog(
   provider: string,
@@ -74,44 +69,4 @@ function fingerprintCatalog(
   };
 
   return createHash("sha256").update(JSON.stringify(projection)).digest("hex");
-}
-
-function buildKnowledgeDocuments(
-  database: AgentDatabaseRuntime,
-  tables: DatabaseCatalogTable[],
-): DatabaseKnowledgeDocument[] {
-  const tableDocuments = tables.map((table) => ({
-    scope: "table",
-    referenceType: "table-summary",
-    referenceKey: `${table.schemaName ?? "default"}.${table.name}`,
-    content: [
-      `${table.schemaName ? `${table.schemaName}.` : ""}${table.name}`,
-      `${table.columns.length} columns`,
-      table.rowCount != null ? `${table.rowCount} rows` : null,
-      table.foreignKeys.length > 0
-        ? `relations: ${table.foreignKeys
-            .map(
-              (foreignKey) =>
-                `${foreignKey.sourceColumn} -> ${foreignKey.targetTable}.${foreignKey.targetColumn}`,
-            )
-            .join("; ")}`
-        : "relations: none",
-    ]
-      .filter(Boolean)
-      .join(" · "),
-  }));
-
-  return [
-    {
-      scope: "database",
-      referenceType: "database-summary",
-      referenceKey: database.sourceId,
-      content: `${database.label} (${database.provider}) with ${tables.length} tables ready for query generation.`,
-      metadata: {
-        provider: database.provider,
-        tableCount: tables.length,
-      },
-    },
-    ...tableDocuments,
-  ];
 }

@@ -15,7 +15,6 @@ import type {
 function col(name: string, dataType = "text"): DatabaseCatalogColumn {
   return {
     name,
-    normalizedName: name,
     dataType,
     isNullable: true,
     isPrimaryKey: false,
@@ -41,7 +40,6 @@ const KNOWLEDGE: DatabaseKnowledgeRuntime = {
       foreignKeys: [],
     },
   ],
-  knowledgeDocuments: [],
 };
 
 const INDEX = buildSchemaIndex(KNOWLEDGE);

@@ -6,7 +6,6 @@ import {
   MAX_LISTED_VALUES,
   collectSampleValues,
   completeValueList,
-  normalizeName,
   sanitizeRow,
   shouldListValues,
 } from "./sanitize.js";
@@ -51,10 +50,8 @@ export async function introspectSqlite(
       return {
         name,
         rowCount,
-        sampleRows,
         columns: columns.map((column) => ({
           name: String(column.name ?? ""),
-          normalizedName: normalizeName(String(column.name ?? "")),
           dataType: String(column.type ?? "TEXT"),
           isNullable: Number(column.notnull ?? 0) === 0,
           isPrimaryKey: Number(column.pk ?? 0) > 0,

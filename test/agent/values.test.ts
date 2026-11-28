@@ -3,11 +3,10 @@ import { extractLiteralFilters, mongoTargets, resolveFilterTable } from "../../s
 import { isSmallTalk } from "../../src/llm/intent/patterns.js";
 import type { DatabaseKnowledgeRuntime } from "../../src/types.js";
 
-const column = (name: string) => ({ name, normalizedName: name, dataType: "text", isNullable: false, isPrimaryKey: false, ordinalPosition: 1 });
+const column = (name: string) => ({ name, dataType: "text", isNullable: false, isPrimaryKey: false, ordinalPosition: 1 });
 const knowledge = {
   schemaFingerprint: null,
   summary: "",
-  knowledgeDocuments: [],
   tables: [
     { name: "orders", columns: [column("status"), column("customer_id")], indexes: [], foreignKeys: [] },
     { name: "customers", columns: [column("region"), column("status")], indexes: [], foreignKeys: [] },

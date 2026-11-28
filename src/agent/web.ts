@@ -10,12 +10,11 @@ function addValue(values: Set<string>, value: unknown) {
   if (text.length >= MIN_VALUE_LENGTH) values.add(text);
 }
 
-/** Every value the model has seen from the user's database: catalog samples and replayed result rows. */
+/** Every value the model has seen from the user's database: catalog sample values and replayed result rows. */
 export function databaseValues(request: AgentRunRequest): Set<string> {
   const values = new Set<string>();
   for (const table of request.knowledge.tables) {
     for (const column of table.columns) for (const value of column.sampleValues ?? []) addValue(values, value);
-    for (const row of table.sampleRows ?? []) for (const value of Object.values(row)) addValue(values, value);
   }
   for (const turn of request.history) {
     for (const row of turn.rows ?? []) for (const value of Object.values(row)) addValue(values, value);

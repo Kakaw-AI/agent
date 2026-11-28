@@ -57,10 +57,6 @@ export function completeValueList(values: unknown[]): string[] | null {
   return [...(values as string[])].sort();
 }
 
-export function normalizeName(value: string) {
-  return normalizeIdentifier(value);
-}
-
 export function sanitizeRow(row: Record<string, unknown>) {
   return Object.fromEntries(
     Object.entries(row).map(([key, value]) => [key, sanitizeValue(key, value)]),

@@ -30,7 +30,7 @@ describe("complete value lists for short text columns", () => {
       indexes: [],
       foreignKeys: [],
       columns: [
-        { name: "name", normalizedName: "name", dataType: "TEXT", isNullable: true, isPrimaryKey: false, ordinalPosition: 2, sampleValues: values! },
+        { name: "name", dataType: "TEXT", isNullable: true, isPrimaryKey: false, ordinalPosition: 2, sampleValues: values! },
       ],
     };
     const line = renderCatalogLine(table);
@@ -59,7 +59,7 @@ describe("complete value lists for short text columns", () => {
       indexes: [],
       foreignKeys: [],
       columns: [
-        { name: "status", normalizedName: "status", dataType: "TEXT", isNullable: true, isPrimaryKey: false, ordinalPosition: 1, sampleValues: ["Shipped", "Delivered"] },
+        { name: "status", dataType: "TEXT", isNullable: true, isPrimaryKey: false, ordinalPosition: 1, sampleValues: ["Shipped", "Delivered"] },
       ],
     });
     expect(line).toContain("e.g. 'Shipped', 'Delivered'");

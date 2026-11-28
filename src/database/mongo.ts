@@ -8,7 +8,6 @@ import {
   SECRET_FIELD_PATTERN,
   collectSampleValues,
   completeValueList,
-  normalizeName,
   sanitizeRow,
   shouldListValues,
 } from "./sanitize.js";
@@ -390,7 +389,6 @@ export function inferColumns(documents: Array<Record<string, unknown>>): Array<O
     const dataType = [...field.types.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "null";
     return {
       name: path,
-      normalizedName: normalizeName(path),
       dataType,
       isNullable: field.present < documents.length,
       isPrimaryKey: path === "_id",
@@ -446,7 +444,6 @@ export async function introspectMongo(database: AgentDatabaseRuntime): Promise<D
       schemaName: null,
       name,
       rowCount,
-      sampleRows,
       columns,
       indexes: indexes.map((index) => ({
         name: String(index.name),

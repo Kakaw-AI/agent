@@ -75,7 +75,7 @@ describe.skipIf(!baseUrl)("MongoDB end to end", () => {
       expect.arrayContaining(["_id", "name", "address.city", "address.country", "tags"]),
     );
     expect(customers.columns.find((column) => column.name === "address.country")?.sampleValues).toEqual(["DE", "FR"]);
-    expect(customers.indexes[0]).toMatchObject({ name: "_id_", isPrimary: true });
+    expect(customers.indexes?.[0]).toMatchObject({ name: "_id_", isPrimary: true });
     const orders = sync.catalog.tables.find((table) => table.name === "orders")!;
     expect(orders.columns.find((column) => column.name === "status")?.sampleValues).toEqual(["Cancelled", "Shipped"]);
     expect(sync.schemaFingerprint).toMatch(/^[0-9a-f]{64}$/);
@@ -155,7 +155,7 @@ describe.skipIf(!baseUrl)("MongoDB end to end", () => {
       message: "How many orders shipped?",
       history: [],
       database: { ...database, schemaFingerprint: sync.schemaFingerprint },
-      knowledge: { schemaFingerprint: sync.schemaFingerprint, summary: "", tables: sync.catalog.tables, knowledgeDocuments: [] },
+      knowledge: { schemaFingerprint: sync.schemaFingerprint, summary: "", tables: sync.catalog.tables },
       llm: { connectionId: "l", provider: "openai", model: "test", apiKey: "k" },
     } as never)) {
       events.push(event as never);
